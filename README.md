@@ -50,6 +50,17 @@ pnpm build:app
 **30 秒验证**：启动后应看到顶栏三盏灯（DSH / 节点 / 总线）与左栏节点名册。
 若左栏为「总线暂无心跳」，说明本机还没有节点在跑——启动一个 DSH 实例即可看到它出现。
 
+> **首次编译踩坑（Windows + Defender ASR）**：若 `cargo` 报
+> `could not execute process ...\build-script-build (never executed)` + `拒绝访问 (os error 5)`，
+> 那是 Defender ASR 规则 `01443614-…`（阻止来源不明的可执行文件）拦下了 cargo 刚生成、尚未签名的
+> build-script exe——**与本项目无关，任何 Rust 项目首次编译都会撞上**（换 target 路径无效，因为拦的是 exe 本身）。
+> 处置（需管理员，UAC 一次）：
+> ```powershell
+> pwsh -File scripts/fix-asr-for-cargo.ps1     # 备份 → 只给本项目 target 目录加排除 → 验证
+> pwsh -File scripts/fix-asr-for-cargo.ps1 -Revert -BackupFile <备份 json>   # 回滚
+> ```
+> 该脚本**不关闭规则**，只为本构建目录放行；备份落在 `%USERPROFILE%\.dsh\asr-backup-*.json`。
+
 ## 配置
 
 | 项 | 默认 | 说明 |
@@ -87,11 +98,29 @@ $b = "$env:USERPROFILE\.dsh-cluster"; $b; (Get-ChildItem "$b\nodes").Count; Get-
 
 ## 测试
 
-<!-- TESTS:BEGIN -->
-（构建验证后填入实测数字与命令）
-<!-- TESTS:END -->
+```bash
+cd src-tauri
+cargo test
+```
 
-端到端验收（P1 判据）见 `docs/semantic.md` §7。
+**实测：8 passed; 0 failed**（2026-09-14 · rustc/cargo 1.93.0 · 首次编译 1m08s）。
+
+覆盖的是**不依赖进程与外部状态**的纯逻辑与边界（坏数据不致命是硬要求，见设计要点 3）：
+
+| 用例 | 验证什么 |
+|---|---|
+| `short_name_maps_dsh_node` | `LAPTOP-…-web-0-31116` → `web-0`；非 DSH 名原样保留 |
+| `scan_nodes_on_empty_dir_is_safe` | 总线目录不存在/为空时不 panic（走空态） |
+| `scan_nodes_reads_heartbeat_and_marks_online` | 心跳解析 + 在线判据 + `port=0` 视为「未上报」 |
+| `scan_nodes_marks_stale_heartbeat_offline` | 60 秒前的心跳判离线 |
+| `scan_nodes_skips_corrupt_and_nameless` | 坏 JSON、缺 `nodeId` 一律跳过，不拖垮整份快照 |
+| `read_trace_skips_corrupt_lines_and_keeps_order` | 行为流坏行跳过、顺序保持 |
+| `fingerprint_reacts_to_bus_changes` | 新增心跳必须改变指纹（否则前端收不到推送） |
+| `snapshot_reports_missing_bus` | 总线缺失时报 `busOk=false` 而不是崩 |
+
+前端侧：类型检查随 `pnpm build`（`tsc --noEmit`）；另有**浏览器演示模式**（`pnpm dev` + 非 Tauri 环境）用于快速目视，**功能验收必须在真实窗口里做**（判据见 `docs/semantic.md` §7）。
+
+> 启动期错误会**直接画在页面上**（`main.tsx` 的 boot-error 覆盖层）——空白页是最没有信息量的失败形态，实测靠它一次定位过 vite 缓存陈旧问题。
 
 ## 设计要点（非显然的约束）
 

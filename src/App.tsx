@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { busSnapshot, dshRecover, dshStatus, onBusChanged } from "./api";
+import { busSnapshot, DEMO, dshRecover, dshStatus, onBusChanged } from "./api";
 import type { DshStatus, LocalEvent, Snapshot } from "./types";
 import { ActionStream } from "./views/ActionStream";
 import { Cockpit } from "./views/Cockpit";
@@ -66,6 +66,12 @@ export function App() {
           爱丽丝工作台<span>多智能体 · 只读总线 · 零模型调用</span>
         </div>
         <div className="hud-spacer" />
+        {DEMO && (
+          <div className="hud-stat">
+            <span className="dot busy" />
+            演示数据 <b>浏览器模式</b>
+          </div>
+        )}
         <div className="hud-stat">
           <span className={`dot ${dsh?.webOnline ? "on" : "err"}`} />
           DSH <b>{dsh?.webOnline ? `在线 :${dsh.port}` : "未响应"}</b>

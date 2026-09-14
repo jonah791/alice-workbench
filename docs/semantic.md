@@ -109,6 +109,7 @@ Rust 后端（唯一写者=mailbox）
 | 前端类型契约 | `src/types.ts`（与 Rust 结构体一一对应） |
 | IPC 封装 | `src/api.ts` |
 | 三视图 | `src/views/Cockpit.tsx` · `NodePanel.tsx` · `ActionStream.tsx` |
+| 验收探针（造非 DSH 心跳） | `scripts/mock-node.ps1`（`-Cleanup` 清理；**不是适配器**，只写心跳） |
 
 ## 9 · 实践修订记录
 
