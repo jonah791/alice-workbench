@@ -169,7 +169,7 @@ fn scan_nodes(dir: &Path) -> Vec<NodeInfo> {
     out
 }
 
-/// `LAPTOP-BF4IAPLM-web-0-31116` → `web-0`（人话名回退：主机名太吵，pid 是噪声）
+/// `DEMO-HOST-web-0-31116` → `web-0`（人话名回退：主机名太吵，pid 是噪声）
 fn short_name(id: &str) -> String {
     let parts: Vec<&str> = id.split('-').collect();
     if parts.len() >= 4 && parts[2] == "web" {
@@ -400,9 +400,9 @@ mod tests {
 
     #[test]
     fn short_name_maps_dsh_node() {
-        assert_eq!(short_name("LAPTOP-BF4IAPLM-web-0-31116"), "web-0");
+        assert_eq!(short_name("DEMO-HOST-web-0-31116"), "web-0");
         assert_eq!(short_name("sim-node-a"), "sim-node-a");
-        assert_eq!(short_name("LAPTOP-BF4IAPLM-web-0"), "web-0");
+        assert_eq!(short_name("DEMO-HOST-web-0"), "web-0");
     }
 
     #[test]
@@ -416,7 +416,7 @@ mod tests {
         let d = tmpdir("hb");
         fs::create_dir_all(d.join("nodes")).unwrap();
         let hb = serde_json::json!({
-            "v": 1, "nodeId": "LAPTOP-BF4IAPLM-web-0-1", "role": "主脑",
+            "v": 1, "nodeId": "DEMO-HOST-web-0-1", "role": "主脑",
             "pid": 42, "port": 0, "atMs": now_ms(), "workspace": "X:\\ws"
         });
         fs::write(d.join("nodes").join("a.json"), hb.to_string()).unwrap();

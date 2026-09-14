@@ -109,7 +109,7 @@ cargo test
 
 | 用例 | 验证什么 |
 |---|---|
-| `short_name_maps_dsh_node` | `LAPTOP-…-web-0-31116` → `web-0`；非 DSH 名原样保留 |
+| `short_name_maps_dsh_node` | `DEMO-HOST-…-web-0-31116` → `web-0`；非 DSH 名原样保留 |
 | `scan_nodes_on_empty_dir_is_safe` | 总线目录不存在/为空时不 panic（走空态） |
 | `scan_nodes_reads_heartbeat_and_marks_online` | 心跳解析 + 在线判据 + `port=0` 视为「未上报」 |
 | `scan_nodes_marks_stale_heartbeat_offline` | 60 秒前的心跳判离线 |
