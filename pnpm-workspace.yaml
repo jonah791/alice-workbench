@@ -1,0 +1,5 @@
+# pnpm 11：构建脚本白名单（新语法 allowBuilds，已取代 package.json 的 "pnpm" 字段）。
+# esbuild 的平台二进制由 optionalDependencies（@esbuild/win32-x64）提供，postinstall 仅做校验；
+# 放行以免 install 以 ERR_PNPM_IGNORED_BUILDS 退出，进而阻断 build。
+allowBuilds:
+  esbuild: true

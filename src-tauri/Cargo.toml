@@ -1,0 +1,25 @@
+[package]
+name = "alice-workbench"
+version = "0.1.0"
+description = "爱丽丝工作台 · 多智能体工作台桌面应用（只读总线 + 零模型调用）"
+authors = ["jonah791"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "alice_workbench_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
