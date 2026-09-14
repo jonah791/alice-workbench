@@ -167,3 +167,27 @@ body::before {
 
 .hint { font-size: 11px; color: var(--weak); }
 .tone-err-text { color: var(--mg); font-size: 11px; }
+
+/* ── 运行时提示条（非致命错误：不遮挡 HUD） ─────────── */
+#toast-host {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 460px;
+  z-index: 900;
+}
+.toast {
+  padding: 8px 11px;
+  background: rgba(26, 32, 48, 0.96);
+  border: 1px solid rgba(255, 45, 149, 0.5);
+  border-left-width: 3px;
+  border-radius: 6px;
+  color: #ffd7ec;
+  font: 11.5px/1.5 var(--mono);
+  cursor: pointer;
+  word-break: break-word;
+}
+.toast:hover { background: rgba(26, 32, 48, 1); }

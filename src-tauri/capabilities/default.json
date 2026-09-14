@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "爱丽丝工作台：读总线快照、监听总线变更、发消息、探测与恢复 DSH。应用不申请文件系统/网络/进程类核心权限（那些能力全在 Rust 侧实现，前端只能通过自定义命令间接触发）。",
+  "windows": ["*"],
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

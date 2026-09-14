@@ -3,9 +3,14 @@ import ReactDOM from "react-dom/client";
 import { App } from "./App";
 import "./styles.css";
 
-/** 启动期错误可见化：空白页面是最没有信息量的失败形态。
- *  把错误直接画在页面上——排查不靠猜，靠页面自己说出来。 */
-function showBootError(label: string, detail: string) {
+/* 错误分级（改自 2026-09-14 实测教训）：
+   最初的实现把**所有** unhandled rejection 都画成整屏覆盖层——结果一个非致命的
+   `event.listen` 权限拒绝把整个驾驶舱遮死了。空白页是最没信息量的失败形态，
+   但**盖住可用 UI** 又走到另一个极端。判据：
+     - 启动期同步致命（渲染都没跑起来）→ 全屏覆盖，因为此时没有 UI 可看；
+     - 运行时非致命（某个能力不可用、某次调用失败）→ 右下角提示条，**UI 该保持可用**。 */
+
+function showFatal(label: string, detail: string) {
   const el = document.createElement("pre");
   el.setAttribute("data-boot-error", label);
   el.style.cssText =
@@ -15,11 +20,27 @@ function showBootError(label: string, detail: string) {
   document.body.appendChild(el);
 }
 
+function showToast(label: string, detail: string) {
+  let host = document.getElementById("toast-host");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "toast-host";
+    document.body.appendChild(host);
+  }
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.textContent = `[${label}] ${detail}`.slice(0, 400);
+  el.title = detail;
+  el.onclick = () => el.remove();
+  host.appendChild(el);
+  window.setTimeout(() => el.remove(), 15_000);
+}
+
 window.addEventListener("error", (e) => {
-  showBootError("boot error", `${e.message}\n${e.filename ?? ""}:${e.lineno ?? ""}`);
+  showToast("error", `${e.message} @ ${e.filename ?? "?"}:${e.lineno ?? "?"}`);
 });
 window.addEventListener("unhandledrejection", (e) => {
-  showBootError("unhandled rejection", String((e as PromiseRejectionEvent).reason));
+  showToast("rejection", String((e as PromiseRejectionEvent).reason));
 });
 
 try {
@@ -29,5 +50,5 @@ try {
     </React.StrictMode>
   );
 } catch (err) {
-  showBootError("render threw", String(err));
+  showFatal("render threw", String(err));
 }

@@ -27,6 +27,18 @@ export function App() {
     };
   }, [pushLocal]);
 
+  // 兜底轮询：事件通道是「快路」（<1s），但权限被拒、监听丢失、窗口休眠都可能让它静默失效。
+  // 低频轮询保证 UI 永远能在数秒内回到真实状态——**两条路都比一条路可靠**（对照 §5.24 兜底纪律）。
+  useEffect(() => {
+    if (DEMO) return;
+    const id = window.setInterval(() => {
+      busSnapshot()
+        .then(setSnap)
+        .catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(id);
+  }, []);
+
   // DSH 运行时状态：纯本地探测（TCP + 文件），10s 一次
   useEffect(() => {
     const tick = () => {
