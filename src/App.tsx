@@ -117,7 +117,7 @@ export function App() {
       </header>
 
       <div className="main">
-        <Cockpit nodes={nodes} selected={selected} onSelect={setSelected} />
+        <Cockpit nodes={nodes} tasks={snap?.tasks ?? []} selected={selected} onSelect={setSelected} />
         <NodePanel node={node} actions={snap?.actions ?? []} messages={snap?.messages ?? []} onLocal={pushLocal} />
         <ActionStream actions={snap?.actions ?? []} local={local} messages={snap?.messages ?? []} />
       </div>

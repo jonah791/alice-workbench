@@ -41,6 +41,25 @@ export interface ActionEvent {
   raw: string;
 }
 
+/** 任务台账视图（`tasks/<taskId>.json`）。诚实边界：台账由**主脑**写（不变量 I8），
+ *  status 最多滞后一个主脑处理周期；实时进度看 `actions`（行为流）。 */
+export interface TaskInfo {
+  taskId: string;
+  shortId?: string | null;
+  intentRef: string;
+  acceptance: string;
+  grade?: string | null;
+  status: string;
+  assignee?: string | null;
+  createdAt: number;
+  lastProgressAt: number;
+  evidenceCount: number;
+  unverifiedCount: number;
+  summary?: string | null;
+  verdictPass?: boolean | null;
+  verdictMethod?: string | null;
+}
+
 export interface Snapshot {
   busDir: string;
   busOk: boolean;
@@ -49,6 +68,7 @@ export interface Snapshot {
   nodes: NodeInfo[];
   messages: MessageInfo[];
   actions: ActionEvent[];
+  tasks: TaskInfo[];
   fingerprint: string;
 }
 

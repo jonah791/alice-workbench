@@ -107,6 +107,34 @@ pub struct ActionEvent {
     pub raw: String,
 }
 
+/// 任务台账视图（`tasks/<taskId>.json`，语义见 dsh-agent-cluster `docs/semantic.md` §5.5）。
+///
+/// **诚实边界**：工作台只读台账，写者只有主脑（不变量 I8）⇒ 这里的 `status` 天然滞后于
+/// 节点实况（最多一个主脑处理周期）。实时进度看 `logs/actions/`（行为流）。UI **不得假装**
+/// 台账是实时的。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskInfo {
+    pub task_id: String,
+    /// 短号（`t-mu1gvjpy-d6sp9j` → `d6sp9j`），列表里显示用
+    pub short_id: Option<String>,
+    /// 主人的原话摘录（不转述——契约要求可追溯）
+    pub intent_ref: String,
+    /// 验收判据（I9：无判据不派发；列表里为空即是主脑侧工具的问题）
+    pub acceptance: String,
+    pub grade: Option<String>,
+    pub status: String,
+    pub assignee: Option<String>,
+    pub created_at: u64,
+    pub last_progress_at: u64,
+    pub evidence_count: usize,
+    /// 未验证项条数——**必须显眼**（诚实优先于好看）
+    pub unverified_count: usize,
+    pub summary: Option<String>,
+    pub verdict_pass: Option<bool>,
+    pub verdict_method: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
@@ -117,6 +145,7 @@ pub struct Snapshot {
     pub nodes: Vec<NodeInfo>,
     pub messages: Vec<MessageInfo>,
     pub actions: Vec<ActionEvent>,
+    pub tasks: Vec<TaskInfo>,
     pub fingerprint: String,
 }
 
@@ -235,6 +264,76 @@ fn scan_messages(dir: &Path) -> Vec<MessageInfo> {
     out
 }
 
+fn arr_len_of(v: &Value, key: &str) -> usize {
+    v.get(key)
+        .and_then(|x| x.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0)
+}
+
+/// 未收尾的排前面：running/dispatched/drafted 优先；done 沉底。
+/// 理由：这是一个「看板」，主人最该先看到的是**还没落定的事**。
+fn status_rank(s: &str) -> u8 {
+    match s {
+        "running" => 0,
+        "dispatched" => 1,
+        "drafted" => 2,
+        "returned" | "verifying" => 3,
+        "failed" => 4,
+        "done" => 5,
+        _ => 6,
+    }
+}
+
+/// 任务台账扫描（只读）。坏文件跳过——与 nodes/messages 同纪律：一条坏数据不得坏掉整屏。
+fn scan_tasks(dir: &Path) -> Vec<TaskInfo> {
+    let mut out = Vec::new();
+    let rd = match fs::read_dir(dir.join("tasks")) {
+        Ok(rd) => rd,
+        Err(_) => return out, // 目录不存在 = 还没派过任务，不是错误
+    };
+    for entry in rd.flatten() {
+        let p = entry.path();
+        if p.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let v = match read_json(&p) {
+            Some(v) => v,
+            None => continue,
+        };
+        let task_id = match str_field(&v, "taskId") {
+            Some(s) if !s.is_empty() => s,
+            _ => continue, // 没有 taskId 的 JSON 不是台账
+        };
+        let result = v.get("result");
+        let verdict = v.get("verdict");
+        out.push(TaskInfo {
+            short_id: task_id.rsplit('-').next().map(|s| s.to_string()),
+            task_id,
+            intent_ref: str_field(&v, "intentRef").unwrap_or_default(),
+            acceptance: str_field(&v, "acceptance").unwrap_or_default(),
+            grade: str_field(&v, "grade"),
+            status: str_field(&v, "status").unwrap_or_else(|| "unknown".into()),
+            assignee: str_field(&v, "assignee"),
+            created_at: u64_field(&v, "createdAt").unwrap_or(0),
+            last_progress_at: u64_field(&v, "lastProgressAt").unwrap_or(0),
+            evidence_count: result.map(|r| arr_len_of(r, "evidence")).unwrap_or(0),
+            unverified_count: result.map(|r| arr_len_of(r, "unverified")).unwrap_or(0),
+            summary: result.and_then(|r| str_field(r, "summary")),
+            verdict_pass: verdict
+                .and_then(|x| x.get("pass"))
+                .and_then(|b| b.as_bool()),
+            verdict_method: verdict.and_then(|x| str_field(x, "method")),
+        });
+    }
+    out.sort_by(|a, b| {
+        status_rank(&a.status)
+            .cmp(&status_rank(&b.status))
+            .then(b.created_at.cmp(&a.created_at))
+    });
+    out
+}
+
 fn read_trace(dir: &Path) -> Vec<ActionEvent> {
     let p = dir.join("cluster-trace.jsonl");
     let md = match fs::metadata(&p) {
@@ -303,6 +402,12 @@ fn fingerprint(dir: &Path) -> String {
             }
         }
     }
+    // tasks/ 纳入指纹：台账变了前端必须收到推送（否则任务列表停在旧状态）
+    if let Ok(rd) = fs::read_dir(dir.join("tasks")) {
+        for e in rd.flatten() {
+            bump(&e.path());
+        }
+    }
     bump(&dir.join("cluster-trace.jsonl"));
     format!("{count}:{acc}")
 }
@@ -318,6 +423,7 @@ pub fn snapshot(dir: &Path) -> Snapshot {
         nodes,
         messages: scan_messages(dir),
         actions: read_trace(dir),
+        tasks: scan_tasks(dir),
         fingerprint: fingerprint(dir),
     }
 }
@@ -473,6 +579,64 @@ mod tests {
         fs::write(d.join("nodes").join("x.json"), "{}").unwrap();
         let after = fingerprint(&d);
         assert_ne!(before, after, "新增心跳必须改变指纹（否则前端不会收到推送）");
+    }
+
+    #[test]
+    fn scan_tasks_on_empty_dir_is_safe() {
+        let d = tmpdir("tasks-empty");
+        assert!(scan_tasks(&d).is_empty());
+    }
+
+    #[test]
+    fn scan_tasks_reads_ledger_and_ranks_unfinished_first() {
+        let d = tmpdir("tasks");
+        fs::create_dir_all(d.join("tasks")).unwrap();
+        let done = serde_json::json!({
+            "v": 1, "taskId": "t-aaa-111111", "intentRef": "已完成的事",
+            "acceptance": "它确实完成了", "status": "done", "assignee": "w1",
+            "createdAt": 2000, "lastProgressAt": 2000,
+            "result": { "status": "ok", "summary": "搞定", "evidence": [{}, {}], "unverified": [] },
+            "verdict": { "by": "primary", "pass": true, "method": "复现证据" }
+        });
+        let running = serde_json::json!({
+            "v": 1, "taskId": "t-bbb-222222", "intentRef": "正在做的事",
+            "acceptance": "判据在此", "status": "running", "assignee": "w2",
+            "createdAt": 1000, "lastProgressAt": 1500,
+            "result": { "evidence": [{}], "unverified": ["第二段"] }
+        });
+        fs::write(d.join("tasks").join("a.json"), done.to_string()).unwrap();
+        fs::write(d.join("tasks").join("b.json"), running.to_string()).unwrap();
+        let t = scan_tasks(&d);
+        assert_eq!(t.len(), 2);
+        // 未收尾的排前面（更该被看见），即便它更旧
+        assert_eq!(t[0].status, "running");
+        assert_eq!(t[0].short_id.as_deref(), Some("222222"));
+        assert_eq!(t[0].evidence_count, 1);
+        assert_eq!(t[0].unverified_count, 1);
+        assert_eq!(t[0].verdict_pass, None);
+        assert_eq!(t[1].status, "done");
+        assert_eq!(t[1].evidence_count, 2);
+        assert_eq!(t[1].verdict_pass, Some(true));
+        assert_eq!(t[1].verdict_method.as_deref(), Some("复现证据"));
+    }
+
+    #[test]
+    fn scan_tasks_skips_corrupt_and_nameless() {
+        let d = tmpdir("tasks-bad");
+        fs::create_dir_all(d.join("tasks")).unwrap();
+        fs::write(d.join("tasks").join("broken.json"), "{ not json").unwrap();
+        fs::write(d.join("tasks").join("nameless.json"), "{\"v\":1}").unwrap();
+        assert!(scan_tasks(&d).is_empty());
+    }
+
+    #[test]
+    fn fingerprint_reacts_to_task_changes() {
+        let d = tmpdir("fp-tasks");
+        let before = fingerprint(&d);
+        fs::create_dir_all(d.join("tasks")).unwrap();
+        fs::write(d.join("tasks").join("t.json"), "{}").unwrap();
+        let after = fingerprint(&d);
+        assert_ne!(before, after, "台账变化必须改变指纹（否则任务列表不刷新）");
     }
 
     #[test]

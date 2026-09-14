@@ -91,13 +91,14 @@ Rust 后端（唯一写者=mailbox）
 
 | # | 判据 | 状态 | 证据 |
 |---|---|---|---|
-| A1 | 打开应用即见 DSH 状态灯 + 节点名册 + 事件流（spec P1-1） | **已验证** | 真实 Tauri 窗口截图：HUD 四灯（演示数据/DSH 在线 :3080/节点 N 在线/总线已挂载）+ 左栏名册 + 右栏行为流 |
+| A1 | 打开应用即见 DSH 状态灯 + 节点名册 + 行为流（spec P1-1 前三项） | **已验证** | 真实 Tauri 窗口截图：HUD 四灯（演示数据/DSH 在线 :3080/节点 N 在线/总线已挂载）+ 左栏名册 + 右栏行为流 |
+| **A1b** | **任务一句话列表**（spec P1-1 的末项） | **部分验证** | 数据层：`scan_tasks` 4 条单测（真实台账结构 / 坏文件跳过 / 未收尾优先排序 / 指纹联动）**12/12 绿**；UI：浏览器实机预览渲染正确（「1 未收尾 / 2 · 1 有待验证项」+ 两条一句话列表 + 未验证项高亮）。⚠ **真实总线数据 → Tauri 窗口这一跳我没能截图确认**（WebView2 内容截取在本环境不可靠），归主人目视 |
 | A2 | 点击节点展开其事件流并出现发消息入口（spec P1-2） | **已验证** | 点击后中栏显示：节点 id / 角色·harness / 心跳 / 进程·端口 / 工作区 + 相关事件 + 消息正文 + 底部 composer |
 | A3 | DSH 未响应时一键恢复可调起运行时管理器，过程在行为流可见（spec P1-3） | **代码审查通过 / 实测受限** | 见下方「为什么没有实测 A3」 |
 | A4 | 新增一个心跳文件后 **1s 内**节点出现在面板（spec P1-4） | **已验证** | 造非 DSH 探针心跳 → 截图在 +2s 内显示 `probe-p1-*` 于名册首位（0s 前）；实现为 150ms 指纹轮询，1s 判据有 6x 余量 |
 | A5 | 应用自身零模型调用（spec P1-5） | **已验证（结构性）** | 无 LLM SDK / 无 endpoint / 无 key；后端只读本地文件 + 一次 TCP 探测 |
 | A6 | 总线缺失/心跳损坏时应用仍可用 | **单元测试覆盖** | `snapshot_reports_missing_bus`、`scan_nodes_skips_corrupt_and_nameless`、`read_trace_skips_corrupt_lines_and_keeps_order` |
-| A7 | Rust 单元测试全绿 | **已验证** | `cargo test` → **8 passed / 0 failed**（2026-09-14） |
+| A7 | Rust 单元测试全绿 | **已验证** | `cargo test` → **12 passed / 0 failed**（2026-09-14，含任务台账 4 条） |
 
 ### 为什么没有实测 A3（重要）
 
@@ -125,7 +126,8 @@ Rust 后端（唯一写者=mailbox）
 | 命令注册与启动 | `src-tauri/src/lib.rs` · `main.rs` |
 | 前端类型契约 | `src/types.ts`（与 Rust 结构体一一对应） |
 | IPC 封装 | `src/api.ts` |
-| 三视图 | `src/views/Cockpit.tsx` · `NodePanel.tsx` · `ActionStream.tsx` |
+| 视图 | `src/views/Cockpit.tsx`（名册 + 任务板）· `NodePanel.tsx` · `ActionStream.tsx` · `TaskBoard.tsx`（任务一句话列表 + 点开看判据/证据/裁决） |
+| 任务台账只读 | `src-tauri/src/bus.rs` 的 `scan_tasks`（数据源 `<busDir>/tasks/<taskId>.json`；协议主副本见 `dsh-agent-cluster/docs/semantic.md` §5.5） |
 | 验收探针（造非 DSH 心跳） | `scripts/mock-node.ps1`（`-Cleanup` 清理；**不是适配器**，只写心跳） |
 
 ## 9 · 实践修订记录
@@ -141,6 +143,8 @@ Rust 后端（唯一写者=mailbox）
 | 2026-09-14 | 前端 Tauri API 改**动态 import** | 顶层 import 让整个模块图在浏览器预览里求值（预览直接白屏）；改后构建产物出现独立 `core/event` chunk，浏览器预览与真窗口共用同一份代码 |
 | 2026-09-14 | **托盘常驻落地**（部分关闭 U2） | 开启 `tray-icon` feature + 托盘菜单（显示工作台 / 退出）+ 主窗口 `CloseRequested` 拦截为 `hide()`。**通知能力刻意不自动化**：spec §4.3 规定通知仅在「三道门」通过时使用，自动提醒会绕过该纪律。判据可证伪：发 `WM_CLOSE` 后 `process alive = True` 且 `window visible = False` ⇒ 关闭 = 收进托盘 |
 | 2026-09-14 | **窗口几何持久化落地**（关闭未决 U8） | 关闭（收托盘）与托盘退出时各保存一次 `outer_position()`/`inner_size()` 到 `<app_config_dir>/window.json`；启动时恢复，并**校验落点仍在某块显示器上**（拔掉外接屏后旧坐标会让窗口"消失"，比不恢复更糟——用 `available_monitors()` 判定）。<br>**踩坑（含一次方向性误判）**：本机 150% 缩放，Win32 `SetWindowPos(300,180)` 后 Tauri `outer_position()` 读数 450,270，比值正好 1.5。我据此断定"保存的是逻辑坐标"并把恢复改成 `LogicalPosition`——**方向错了**：真相是 **Win32 那一侧在互操作时按逻辑坐标走**，Tauri 侧自始至终是物理，正确配对就是 `PhysicalPosition`。教训：**不要用比值倒推单位归属，先确定是哪一侧的 API**。<br>**验证判据（往返自洽，可证伪）**：移动 → 关闭 → 重启 → 窗口位置不变（实测 Win32 视角 300,180 保持不变；默认位置本应居中，故非巧合） |
+
+| 2026-09-14 | **P1-1 漏项补齐：任务视图** | spec §7-P1-1 原文含「**任务一句话列表**」，P1 交付时只落了状态灯/名册/行为流——**按自己的理解验收**导致整项漏掉（教训已入 `AGENTS.md` §5.9 规则 5：「通过」要看理由，验收逐字对照判据原文）。补齐：Rust `scan_tasks`（只读 `tasks/`，坏文件跳过，**未收尾优先排序**）+ `TaskBoard` 组件（一句话列表 + 点开看判据/证据/裁决，**未验证项必须显眼**）+ 指纹纳入 `tasks/`（否则列表停在旧状态）。数据源首次有真实内容：真实总线上的 `t-mu1gvjpy-d6sp9j`（由**参考适配器** ref-node 执行、主脑独立复现 sha256 后裁决 done） |
 
 ## 10 · 未决问题
 

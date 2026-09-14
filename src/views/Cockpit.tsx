@@ -1,4 +1,5 @@
-import type { NodeInfo } from "../types";
+import type { NodeInfo, TaskInfo } from "../types";
+import { TaskBoard } from "./TaskBoard";
 
 const ageText = (ms: number): string => {
   if (!Number.isFinite(ms) || ms > 1e12) return "—";
@@ -12,10 +13,12 @@ const ageText = (ms: number): string => {
 
 export function Cockpit({
   nodes,
+  tasks,
   selected,
   onSelect,
 }: {
   nodes: NodeInfo[];
+  tasks: TaskInfo[];
   selected: string | null;
   onSelect: (id: string) => void;
 }) {
@@ -46,6 +49,9 @@ export function Cockpit({
             </span>
           </button>
         ))}
+
+        {/* 任务台账（spec P1-1 的「任务一句话列表」）：数据源 = 总线 tasks/，只读 */}
+        <TaskBoard tasks={tasks} />
       </div>
     </section>
   );
