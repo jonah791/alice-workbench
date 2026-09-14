@@ -129,6 +129,14 @@ export function mockSnapshot(): Snapshot {
         verdictMethod: "复现证据（sha256 独立复算一致）",
       },
     ],
+    steps: [
+      { atMs: base - 30_000, actionId: "a-demo-1", node: "probe-a-1200", stage: "start", step: 0, total: 3, humanText: "收到任务 t-demo-0001-a1b2c3，拆解为 3 步", taskId: "t-demo-0001-a1b2c3" },
+      { atMs: base - 29_800, actionId: "a-demo-1", node: "probe-a-1200", stage: "stage", step: 1, total: 3, humanText: "第 1/3 步：创建目录 demo", taskId: "t-demo-0001-a1b2c3" },
+      { atMs: base - 29_600, actionId: "a-demo-1", node: "probe-a-1200", stage: "stage", step: 2, total: 3, humanText: "第 2/3 步：写文件 demo/ok.txt", taskId: "t-demo-0001-a1b2c3" },
+      { atMs: base - 29_400, actionId: "a-demo-1", node: "probe-a-1200", stage: "stage", step: 3, total: 3, humanText: "第 3/3 步：计算摘要 demo/ok.txt", taskId: "t-demo-0001-a1b2c3" },
+      { atMs: base - 600_000, actionId: "a-demo-2", node: "probe-a-1200", stage: "start", step: 0, total: 3, humanText: "收到任务 t-demo-0002-d4e5f6，拆解为 3 步", taskId: "t-demo-0002-d4e5f6" },
+      { atMs: base - 540_000, actionId: "a-demo-2", node: "probe-a-1200", stage: "done", step: 3, total: 3, humanText: "任务完成，3 条证据", taskId: "t-demo-0002-d4e5f6" },
+    ],
     fingerprint: `mock-${tick}`,
   };
 }

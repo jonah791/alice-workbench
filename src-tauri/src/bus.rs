@@ -135,6 +135,28 @@ pub struct TaskInfo {
     pub verdict_method: Option<String>,
 }
 
+/// 结构性动作的分阶段事件（`logs/actions/<actionId>.jsonl`，语义见 dsh-agent-cluster
+/// `docs/semantic.md` §5.7）。
+///
+/// 这是「**节点正在做什么**」的数据源，与 `TaskInfo`（账本状态，滞后一个主脑周期）互补。
+/// 契约要求分阶段落盘（不变量 I10），所以能看到 `start → stage×N → done|failed` 的时间线；
+/// 但**思考不落盘**——只显示「在做什么」，不假装显示「在想什么」（spec §5.2 的诚实边界）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StepEvent {
+    pub at_ms: u64,
+    pub action_id: String,
+    pub node: Option<String>,
+    pub stage: String,
+    pub step: u64,
+    pub total: u64,
+    pub human_text: String,
+    /// 从同一 `actionId` 的任意一行提取（`detail.taskId`）后**回填给组内每一条**——
+    /// 因为 taskId 只出现在 `start`/`done` 行，不回填则 `stage` 行挂不上任务，
+    /// 前端就无法「点开任务看它怎么干的」。
+    pub task_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
@@ -146,6 +168,7 @@ pub struct Snapshot {
     pub messages: Vec<MessageInfo>,
     pub actions: Vec<ActionEvent>,
     pub tasks: Vec<TaskInfo>,
+    pub steps: Vec<StepEvent>,
     pub fingerprint: String,
 }
 
@@ -334,6 +357,88 @@ fn scan_tasks(dir: &Path) -> Vec<TaskInfo> {
     out
 }
 
+/// 行为事件的规模上限：历史越长越不该全量扫。
+const ACTION_FILES: usize = 24;
+const ACTION_LINES_PER_FILE: usize = 400;
+const STEP_LIMIT: usize = 600;
+
+/// 行为事件扫描（`logs/actions/<actionId>.jsonl`，一行一阶段）。
+/// 与其它扫描同纪律：坏行跳过、目录不存在不算错。
+fn scan_actions(dir: &Path) -> Vec<StepEvent> {
+    let root = dir.join("logs").join("actions");
+    let rd = match fs::read_dir(&root) {
+        Ok(rd) => rd,
+        Err(_) => return Vec::new(), // 还没节点写过行为事件，不是错误
+    };
+
+    // 只取最近修改的若干 action 文件
+    let mut files: Vec<(u64, PathBuf)> = rd
+        .flatten()
+        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("jsonl"))
+        .filter_map(|e| {
+            let t = e
+                .metadata()
+                .ok()?
+                .modified()
+                .ok()?
+                .duration_since(UNIX_EPOCH)
+                .ok()?
+                .as_millis() as u64;
+            Some((t, e.path()))
+        })
+        .collect();
+    files.sort_by(|a, b| b.0.cmp(&a.0));
+    files.truncate(ACTION_FILES);
+
+    let mut out: Vec<StepEvent> = Vec::new();
+    for (_, p) in files {
+        let text = match fs::read_to_string(&p) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+        let action_id = p
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let all: Vec<&str> = text.lines().collect();
+        let start = all.len().saturating_sub(ACTION_LINES_PER_FILE);
+        let mut group: Vec<StepEvent> = Vec::new();
+        let mut task_id: Option<String> = None;
+
+        for line in &all[start..] {
+            let v: Value = match serde_json::from_str(line) {
+                Ok(v) => v,
+                Err(_) => continue, // 单行坏数据不得坏掉整组
+            };
+            if task_id.is_none() {
+                task_id = v.get("detail").and_then(|d| str_field(d, "taskId"));
+            }
+            group.push(StepEvent {
+                at_ms: u64_field(&v, "atMs").unwrap_or(0),
+                action_id: action_id.clone(),
+                node: str_field(&v, "node"),
+                stage: str_field(&v, "stage").unwrap_or_else(|| "unknown".into()),
+                step: u64_field(&v, "step").unwrap_or(0),
+                total: u64_field(&v, "total").unwrap_or(0),
+                human_text: str_field(&v, "humanText").unwrap_or_default(),
+                task_id: None,
+            });
+        }
+        // 整组解析完再回填 taskId（它只在 start/done 行出现）
+        for mut e in group {
+            e.task_id = task_id.clone();
+            out.push(e);
+        }
+    }
+
+    out.sort_by(|a, b| a.at_ms.cmp(&b.at_ms));
+    if out.len() > STEP_LIMIT {
+        out.drain(0..out.len() - STEP_LIMIT); // 只留最新的一段
+    }
+    out
+}
+
 fn read_trace(dir: &Path) -> Vec<ActionEvent> {
     let p = dir.join("cluster-trace.jsonl");
     let md = match fs::metadata(&p) {
@@ -408,6 +513,12 @@ fn fingerprint(dir: &Path) -> String {
             bump(&e.path());
         }
     }
+    // logs/actions/ 同理：节点干活时界面必须动起来（否则「正在做什么」是死的）
+    if let Ok(rd) = fs::read_dir(dir.join("logs").join("actions")) {
+        for e in rd.flatten() {
+            bump(&e.path());
+        }
+    }
     bump(&dir.join("cluster-trace.jsonl"));
     format!("{count}:{acc}")
 }
@@ -424,6 +535,7 @@ pub fn snapshot(dir: &Path) -> Snapshot {
         messages: scan_messages(dir),
         actions: read_trace(dir),
         tasks: scan_tasks(dir),
+        steps: scan_actions(dir),
         fingerprint: fingerprint(dir),
     }
 }
@@ -637,6 +749,66 @@ mod tests {
         fs::write(d.join("tasks").join("t.json"), "{}").unwrap();
         let after = fingerprint(&d);
         assert_ne!(before, after, "台账变化必须改变指纹（否则任务列表不刷新）");
+    }
+
+    #[test]
+    fn scan_actions_on_empty_dir_is_safe() {
+        let d = tmpdir("steps-empty");
+        assert!(scan_actions(&d).is_empty());
+    }
+
+    #[test]
+    fn scan_actions_backfills_task_id_to_every_row() {
+        let d = tmpdir("steps");
+        fs::create_dir_all(d.join("logs").join("actions")).unwrap();
+        let lines = [
+            r#"{"atMs":10,"actionId":"a-1","node":"w1","stage":"start","step":0,"total":2,"humanText":"收到任务 t-x-1，拆解为 2 步","detail":{"taskId":"t-x-1","plan":[]}}"#,
+            r#"{"atMs":11,"actionId":"a-1","node":"w1","stage":"stage","step":1,"total":2,"humanText":"第 1/2 步：建目录","detail":{"op":"fs.mkdir","path":"docs"}}"#,
+            r#"{"atMs":12,"actionId":"a-1","node":"w1","stage":"stage","step":2,"total":2,"humanText":"第 2/2 步：写文件","detail":{"op":"fs.write","path":"docs/a.md"}}"#,
+            r#"{"atMs":13,"actionId":"a-1","node":"w1","stage":"done","step":2,"total":2,"humanText":"任务完成","detail":{"taskId":"t-x-1","evidenceCount":2}}"#,
+        ];
+        fs::write(
+            d.join("logs").join("actions").join("a-1.jsonl"),
+            lines.join("\n"),
+        )
+        .unwrap();
+        let s = scan_actions(&d);
+        assert_eq!(s.len(), 4);
+        assert_eq!(s[0].stage, "start");
+        assert_eq!(s[3].stage, "done");
+        // 回填：连没有 taskId 的 stage 行也要挂上任务（否则前端没法按任务过滤）
+        assert!(
+            s.iter().all(|e| e.task_id.as_deref() == Some("t-x-1")),
+            "stage 行必须被回填 taskId"
+        );
+        assert_eq!(s[2].step, 2);
+        assert_eq!(s[2].total, 2);
+        assert_eq!(s[0].action_id, "a-1");
+    }
+
+    #[test]
+    fn scan_actions_skips_corrupt_lines_and_keeps_order() {
+        let d = tmpdir("steps-bad");
+        fs::create_dir_all(d.join("logs").join("actions")).unwrap();
+        fs::write(
+            d.join("logs").join("actions").join("a-2.jsonl"),
+            "{\"atMs\":5,\"stage\":\"start\",\"humanText\":\"x\"}\nnot-json\n{\"atMs\":9,\"stage\":\"done\"}\n",
+        )
+        .unwrap();
+        let s = scan_actions(&d);
+        assert_eq!(s.len(), 2, "坏行跳过而不是丢整组");
+        assert_eq!(s[0].at_ms, 5);
+        assert_eq!(s[1].at_ms, 9);
+        assert!(s[0].task_id.is_none(), "没有 detail.taskId 时不得瞎填");
+    }
+
+    #[test]
+    fn fingerprint_reacts_to_action_changes() {
+        let d = tmpdir("fp-actions");
+        let before = fingerprint(&d);
+        fs::create_dir_all(d.join("logs").join("actions")).unwrap();
+        fs::write(d.join("logs").join("actions").join("a-3.jsonl"), "{}\n").unwrap();
+        assert_ne!(before, fingerprint(&d), "节点干活时界面必须收到推送");
     }
 
     #[test]

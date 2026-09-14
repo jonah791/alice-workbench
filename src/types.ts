@@ -60,6 +60,20 @@ export interface TaskInfo {
   verdictMethod?: string | null;
 }
 
+/** 结构性动作的分阶段事件（`logs/actions/<actionId>.jsonl`）。
+ *  这是「节点正在做什么」的数据源——与 `TaskInfo`（账本状态，滞后）互补。
+ *  `taskId` 由 Rust 侧从同组任意一行回填，前端可据此「点开任务看它怎么干的」。 */
+export interface StepEvent {
+  atMs: number;
+  actionId: string;
+  node?: string | null;
+  stage: string;
+  step: number;
+  total: number;
+  humanText: string;
+  taskId?: string | null;
+}
+
 export interface Snapshot {
   busDir: string;
   busOk: boolean;
@@ -69,6 +83,7 @@ export interface Snapshot {
   messages: MessageInfo[];
   actions: ActionEvent[];
   tasks: TaskInfo[];
+  steps: StepEvent[];
   fingerprint: string;
 }
 
