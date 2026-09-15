@@ -1,5 +1,5 @@
 import { mockDshStatus, mockSnapshot } from "./mock";
-import type { DshStatus, Snapshot } from "./types";
+import type { DshStatus, Snapshot, SpawnedNode } from "./types";
 
 /** 是否运行在 Tauri 窗口里。浏览器里 `invoke` 必然失败，因此显式分流。 */
 export const IS_TAURI =
@@ -45,6 +45,21 @@ export const dshStatus = async (): Promise<DshStatus> =>
 
 export const dshRecover = async (): Promise<string> =>
   DEMO ? "（演示模式）不会真的启动 DSH" : (await core())<string>("dsh_recover");
+
+/* ── 节点生命周期 ─────────────────────────────────────────────────────
+   工作台是**启动方**，因此也负责收尸：Windows 上 Node 收不到 SIGTERM
+   （进程不会自己清心跳）⇒ stop 必须显式删心跳 + 校验归属。 */
+
+export const spawnedNodes = async (): Promise<SpawnedNode[]> =>
+  DEMO ? [] : (await core())<SpawnedNode[]>("spawned_nodes");
+
+export const spawnRefNode = async (displayName?: string): Promise<SpawnedNode> =>
+  DEMO
+    ? { nodeId: "demo-wb-0", displayName: displayName ?? "参考节点", pid: 0, atMs: Date.now(), workdir: "" }
+    : (await core())<SpawnedNode>("spawn_ref_node", { displayName });
+
+export const stopRefNode = async (nodeId: string): Promise<string> =>
+  DEMO ? "（演示模式）不会真的停止节点" : (await core())<string>("stop_ref_node", { nodeId });
 
 /** 演示模式下用定时器模拟"总线有变化"，让行为流与节点灯看起来是活的。 */
 export const onBusChanged = async (fn: (s: Snapshot) => void): Promise<() => void> => {

@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { sendMessage } from "../api";
-import type { ActionEvent, MessageInfo, NodeInfo } from "../types";
+import { useEffect, useState } from "react";
+import { sendMessage, spawnedNodes, stopRefNode } from "../api";
+import type { ActionEvent, MessageInfo, NodeInfo, SpawnedNode } from "../types";
 
 const hhmmss = (ms: number): string => {
   if (!Number.isFinite(ms) || ms <= 0) return "--:--:--";
@@ -33,6 +33,29 @@ export function NodePanel({
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
 
+  /** 这个节点是不是**工作台自己起的**？只有自己起的才给「停止」——
+   *  安全边界：工作台绝不停不是自己起的进程（归属账本见 Rust `nodes.rs`）。
+   *  自己问而不靠上层透传：面板是唯一需要这个事实的地方。 */
+  const [mine, setMine] = useState<SpawnedNode | null>(null);
+  const [confirmStop, setConfirmStop] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const nodeId = node?.id ?? null;
+  useEffect(() => {
+    if (!nodeId) {
+      setMine(null);
+      return;
+    }
+    let alive = true;
+    spawnedNodes()
+      .then((list) => {
+        if (alive) setMine(list.find((s) => s.nodeId === nodeId) ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [nodeId]);
+
   if (!node) {
     return (
       <section className="panel">
@@ -51,6 +74,27 @@ export function NodePanel({
     .slice(-60)
     .reverse();
   const relatedMsgs = messages.filter((m) => m.to === node.id || m.from === node.id).slice(0, 30);
+
+  const doStop = async () => {
+    if (!node || !mine) return;
+    if (!confirmStop) {
+      setConfirmStop(true);
+      onLocal("再点一次确认：停止会终止该节点进程并清理它的心跳", "warn");
+      window.setTimeout(() => setConfirmStop(false), 5000);
+      return;
+    }
+    setConfirmStop(false);
+    setStopping(true);
+    try {
+      const msg = await stopRefNode(node.id);
+      onLocal(msg, "ok");
+      setMine(null);
+    } catch (e) {
+      onLocal(`停止失败：${String(e)}`, "err");
+    } finally {
+      setStopping(false);
+    }
+  };
 
   const submit = async () => {
     const t = text.trim();
@@ -131,6 +175,23 @@ export function NodePanel({
           </>
         )}
       </div>
+
+      {mine && (
+        <div className="spawned-box">
+          <div className="hint">工作台启动的节点 · pid {mine.pid}</div>
+          <button
+            className={`btn ${confirmStop ? "warn" : ""}`}
+            disabled={stopping}
+            onClick={() => void doStop()}
+            title="终止该节点进程并删除它的心跳文件"
+          >
+            {stopping ? "停止中…" : confirmStop ? "确认停止？再点一次" : "停止并清理心跳"}
+          </button>
+          <div className="hint" style={{ marginTop: 6, lineHeight: 1.7 }}>
+            Windows 上 Node 收不到 SIGTERM ⇒ 进程不会自己清心跳，**停止由启动方收尸**。
+          </div>
+        </div>
+      )}
 
       <div className="composer">
         <textarea

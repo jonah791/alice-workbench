@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { sendMessage } from "../api";
+import { sendMessage, spawnRefNode } from "../api";
 import type { StarMapModel } from "../starmap/layout";
 import type { NodeInfo } from "../types";
 
@@ -115,6 +115,21 @@ export function Starter({
   const core = nodes.find((n) => n.id === model.coreId) ?? online[0] ?? null;
   const { stats } = model;
 
+  /** 起节点：**判据是心跳真的出现**（Rust 侧 `spawn_ref_node` 会等 3 秒核对心跳，
+   *  没出现就如实报错——不假装成功）。 */
+  const [spawning, setSpawning] = useState(false);
+  const spawn = async () => {
+    setSpawning(true);
+    try {
+      const n = await spawnRefNode("参考节点");
+      onLocal(`已起节点 ${n.displayName}（${n.nodeId} · pid ${n.pid}）`, "ok");
+    } catch (e) {
+      onLocal(`起节点失败：${String(e)}`, "err");
+    } finally {
+      setSpawning(false);
+    }
+  };
+
   /** 目标默认给**主脑**：它有派发能力（节点只是执行者），所以「交给主脑」总是有意义的一步。 */
   const targets = useMemo(() => {
     const list = [...nodes].sort((a, b) => Number(b.online) - Number(a.online));
@@ -131,14 +146,14 @@ export function Starter({
           </span>
         </div>
         <p className="starter-lead">
-          {core ? (
+          {online.length === 0 ? (
+            <>总线里还没有活着的节点——投递的消息会留在 mailbox 里等它上线。</>
+          ) : (
             <>
-              总线里此刻只有 <b>{core.displayName}</b> 在活着
+              总线里此刻活着的只有 <b>{online.map((n) => n.displayName).join("、")}</b>
               {stats.retired > 0 ? <>（另有 {stats.retired} 个是历史心跳，不占星位）</> : null}。
               交给它一件事，或者先看看总线里都有什么。
             </>
-          ) : (
-            <>总线里还没有活着的节点——投递的消息会留在 mailbox 里等它上线。</>
           )}
         </p>
 
@@ -147,6 +162,14 @@ export function Starter({
         )}
 
         <div className="starter-actions">
+          <button
+            className="btn primary"
+            disabled={spawning}
+            onClick={() => void spawn()}
+            title="起一个参考节点（ref-node 适配器）：能收任务、逐步执行、回证据；不消耗模型 token"
+          >
+            {spawning ? "启动中…" : "起一个参考节点"}
+          </button>
           <button className="btn" onClick={onShowList} title="名册与任务一句话列表">
             看总线全貌（{stats.total} 个节点
             {stats.retired > 0 ? ` · 含 ${stats.retired} 个退役` : ""}）

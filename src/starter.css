@@ -5,8 +5,10 @@
   position: absolute;
   inset: 0;
   display: grid;
-  place-items: center;
-  padding: 20px;
+  /* 靠**左中**：星图是径向布局（中心=主脑、内/外环=在线/离线），
+     正中与底部是信息最密的地方（中央星群 / 图例）——卡片贴左上或左下都会压住它们。 */
+  place-items: center start;
+  padding: 18px;
   pointer-events: none; /* 空白区仍可点到星图（取消选择） */
 }
 
@@ -113,5 +115,21 @@
 /* 起步层是绝对定位叠层，主区必须成为定位上下文 */
 .stage {
   position: relative;
+}
+
+/* 节点详情里的「工作台启动的节点」块：只对自己起的节点出现 */
+.spawned-box {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-hi);
+  padding: 10px;
+  margin: 0 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+.spawned-box .hint {
+  font-size: 11px;
 }
 

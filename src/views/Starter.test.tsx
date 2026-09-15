@@ -40,8 +40,15 @@ const SPARSE: Snapshot = {
 };
 
 /** `vi.mock` 会被提升到文件顶部，工厂执行时普通 `const` 仍在 TDZ ⇒ 必须先 `vi.hoisted` 建 mock。 */
-const { sendMessage } = vi.hoisted(() => ({
+const { sendMessage, spawnRefNode } = vi.hoisted(() => ({
   sendMessage: vi.fn(async (_to: string, _text: string, _kind?: string) => "m-test-1"),
+  spawnRefNode: vi.fn(async (displayName?: string) => ({
+    nodeId: "host-wb-0",
+    displayName: displayName ?? "参考节点",
+    pid: 4242,
+    atMs: 0,
+    workdir: "E:/x/work",
+  })),
 }));
 
 vi.mock("../api", async (importOriginal) => {
@@ -62,6 +69,9 @@ vi.mock("../api", async (importOriginal) => {
       detail: "ok",
     }),
     sendMessage,
+    spawnRefNode,
+    spawnedNodes: async () => [],
+    stopRefNode: async () => "（测试）已停止",
     dshRecover: async () => "ok",
   };
 });
@@ -73,10 +83,11 @@ describe("起步层（稀疏态）", () => {
   });
   afterEach(() => cleanup());
 
-  it("判据：在线 ≤2 且无待办 = 稀疏；有活要干就不算", () => {
+  it("判据：只有主脑自己且无待办 = 稀疏；≥2 节点让位给星图", () => {
     const base = { online: 1, total: 1, busy: 0, openTasks: 0, failedTasks: 0, unverified: 0, retired: 13 };
     expect(isSparse(base)).toBe(true);
-    expect(isSparse({ ...base, online: 2 })).toBe(true);
+    // ≥2 个活节点 ⇒ 星图有两颗星可看，大卡片会让位（实测：第二个节点上线后新星被卡片挡住）
+    expect(isSparse({ ...base, online: 2 })).toBe(false);
     expect(isSparse({ ...base, online: 3 })).toBe(false);
     expect(isSparse({ ...base, openTasks: 1 })).toBe(false);
   });
@@ -108,7 +119,23 @@ describe("起步层（稀疏态）", () => {
   it("空态也保留「看全貌」出口（聚合 ≠ 隐藏）", async () => {
     const { container } = render(<App />);
     await waitFor(() => expect(container.querySelector(".starter")).toBeTruthy());
-    fireEvent.click(container.querySelector(".starter-actions .btn")!);
+    // 按**文本**定位，不按位置：起节点按钮加入后 `.starter-actions .btn` 不再唯一
+    // （这正是原写法被本次改动打破的地方——测试要断言意图，不要断言顺序）
+    const btns = Array.from(container.querySelectorAll(".starter-actions .btn"));
+    const full = btns.find((b) => b.textContent?.includes("看总线全貌"));
+    expect(full).toBeTruthy();
+    fireEvent.click(full!);
     await waitFor(() => expect(container.textContent).toContain("节点名册"));
+  });
+
+  it("起节点按钮存在，且点击真的调 spawn_ref_node（写面之外唯一的进程启动点）", async () => {
+    const { container } = render(<App />);
+    await waitFor(() => expect(container.querySelector(".starter")).toBeTruthy());
+    const spawnBtn = Array.from(container.querySelectorAll(".starter-actions .btn")).find((b) =>
+      b.textContent?.includes("起一个参考节点"),
+    );
+    expect(spawnBtn).toBeTruthy();
+    fireEvent.click(spawnBtn!);
+    await waitFor(() => expect(spawnRefNode).toHaveBeenCalledTimes(1));
   });
 });

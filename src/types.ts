@@ -105,3 +105,14 @@ export interface LocalEvent {
   text: string;
   tone: "info" | "ok" | "warn" | "err";
 }
+
+/** 工作台启动过的节点（Rust 侧 sidecar `.workbench-spawned.json` 的视图）。
+ *  **归属账本是安全边界的一部分**：只有登记在这里的节点才允许被停止——
+ *  工作台绝不停不是自己起的进程（对照 `nodes.rs` 的模块注释）。 */
+export interface SpawnedNode {
+  nodeId: string;
+  displayName: string;
+  pid: number;
+  atMs: number;
+  workdir: string;
+}

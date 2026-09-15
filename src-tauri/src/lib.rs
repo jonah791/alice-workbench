@@ -1,5 +1,6 @@
 mod bus;
 mod dsh;
+mod nodes;
 
 use serde_json::json;
 use std::fs;
@@ -124,6 +125,9 @@ pub fn run() {
             bus::send_message,
             dsh::dsh_status,
             dsh::dsh_recover,
+            nodes::spawn_ref_node,
+            nodes::stop_ref_node,
+            nodes::spawned_nodes,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run alice-workbench");
