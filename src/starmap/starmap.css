@@ -63,10 +63,11 @@
 .sat .unverified { fill: none; stroke: var(--am); stroke-width: 1.1; stroke-dasharray: 2 2; }
 .sat:hover .body, .sat.sel .body { stroke: #ffffff; stroke-width: 1.6; }
 
-/* 退役节点聚合标记：虚线环 + 计数（不占星位，但看得见） */
-.retired .body { fill: rgba(255, 255, 255, 0.02); stroke: #39414d; stroke-width: 1; stroke-dasharray: 3 3; }
+/* 退役节点聚合标记：虚线环 + 计数（不占星位，但看得见）。
+   对比度与「离线星」同档：它是脚注，不是主角——但不能看不见。 */
+.retired .body { fill: rgba(255, 255, 255, 0.02); stroke: #4a5563; stroke-width: 1.2; stroke-dasharray: 3 3; }
 .retired .badge {
-  fill: var(--weak);
+  fill: var(--dim);
   font: 11px var(--mono);
   text-anchor: middle;
   paint-order: stroke;
