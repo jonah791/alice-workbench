@@ -1,0 +1,173 @@
+/* 星图 / 脉冲条 / 上下文面板 —— v0.2 图形化改版的样式。
+   与 styles.css 的分工：全局 token 与通用控件在 styles.css，本文件只管星图体系。
+   纪律：强调色只用于状态；不做常驻动画（忙碌心跳是状态，不是装饰）。 */
+
+/* ── 主区布局：星图 + 上下文面板（v0.1 是三列） ─────────── */
+.main {
+  grid-template-columns: minmax(0, 1fr) 372px;
+}
+.stage { min-width: 0; min-height: 0; display: flex; overflow: hidden; }
+.stage .panel { border-right: none; }
+
+/* ── 星图 ─────────────────────────────────────────── */
+.map-wrap { position: relative; flex: 1; min-width: 0; min-height: 0; }
+.starmap { width: 100%; height: 100%; display: block; }
+.map-bg { fill: transparent; cursor: default; }
+
+.orbits circle {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.05);
+  stroke-width: 1;
+  stroke-dasharray: 2 7;
+}
+.orbits circle:last-child { stroke: rgba(255, 255, 255, 0.032); }
+
+/* 光弧：消息通道 */
+.link { fill: none; stroke: rgba(0, 229, 255, 0.22); stroke-width: 1.3; }
+.link.fresh { stroke: rgba(0, 229, 255, 0.75); animation: flashLink 1.4s ease-out; }
+@keyframes flashLink {
+  from { stroke: rgba(0, 229, 255, 1); stroke-width: 2.8; }
+  to { stroke: rgba(0, 229, 255, 0.75); stroke-width: 1.3; }
+}
+
+/* 恒星：节点 */
+.star .hit, .sat .hit { fill: transparent; cursor: pointer; }
+.star .body { fill: #131a24; stroke: #2a3644; stroke-width: 1.4; transition: stroke 0.15s, fill 0.15s; }
+.star.online .body { fill: rgba(0, 229, 255, 0.16); stroke: var(--cy); }
+.star.busy .body { fill: rgba(255, 179, 0, 0.2); stroke: var(--am); }
+.star.offline .body { fill: #161c26; stroke: #4a5563; }
+.star.fault .body { fill: rgba(255, 45, 149, 0.2); stroke: var(--mg); }
+.star.core .body { fill: rgba(0, 229, 255, 0.3); stroke: #7ff0ff; stroke-width: 1.8; }
+.star.core .core-ring { fill: none; stroke: rgba(0, 229, 255, 0.4); stroke-width: 1; }
+.star:hover .body { stroke: #ffffff; }
+.star.sel .body { stroke: #ffffff; stroke-width: 2.2; }
+.star .pulse { fill: rgba(255, 179, 0, 0.13); animation: breathe 2.2s ease-in-out infinite; }
+/* 名字与徽标压一层描边（halo）：否则在网格纹理上会糊 */
+.star .badge, .star .label {
+  fill: var(--dim);
+  font: 11.5px var(--mono);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: #0a0e14;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.star .label { font-size: 11px; }
+.star.offline .label { display: none; }
+
+/* 卫星：任务 */
+.sat .body { fill: rgba(0, 229, 255, 0.55); stroke: #9ff2ff; stroke-width: 0.8; }
+.sat.st-running .body { fill: rgba(255, 179, 0, 0.8); stroke: #ffd47f; }
+.sat.st-done .body { fill: rgba(61, 220, 132, 0.5); stroke: #8ff0b6; }
+.sat.st-failed .body { fill: var(--mg); stroke: #ff9ccb; }
+.sat .unverified { fill: none; stroke: var(--am); stroke-width: 1.1; stroke-dasharray: 2 2; }
+.sat:hover .body, .sat.sel .body { stroke: #ffffff; stroke-width: 1.6; }
+
+/* 图例：天体语义的唯一说明（文字纪律的例外，压到一行） */
+.legend {
+  position: absolute;
+  left: 14px;
+  bottom: 10px;
+  display: flex;
+  gap: 11px;
+  font-size: 10.5px;
+  color: var(--weak);
+  pointer-events: none;
+}
+.legend i {
+  width: 8px; height: 8px; border-radius: 50%;
+  display: inline-block; margin-right: 4px; vertical-align: middle;
+}
+.k-core { background: var(--cy); }
+.k-on { background: rgba(0, 229, 255, 0.3); border: 1px solid var(--cy); }
+.k-busy { background: var(--am); }
+.k-off { background: #39414d; }
+.k-fault { background: var(--mg); }
+.k-sat { background: var(--am); border-radius: 2px !important; }
+.k-uv { background: transparent; border: 1px dashed var(--am); }
+
+.map-empty {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--weak); font-size: 12px;
+}
+
+/* ── 脉冲条：行为事件的图形化 ───────────────────────── */
+.pulsebar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 46px;
+  padding: 0 12px;
+  border-top: 1px solid var(--line);
+  background: linear-gradient(0deg, #0c1017, #10141c);
+}
+.pulsebar.open { height: auto; min-height: 46px; flex-direction: column; align-items: stretch; gap: 0; }
+.pulsebar.open .pulse-toggle, .pulsebar.open .ticks, .pulsebar.open .pulse-meta { margin-top: 6px; }
+.pulsebar.open .ticks { margin-bottom: 6px; }
+
+.pulse-toggle {
+  flex: none;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--dim);
+  font: inherit; font-size: 11.5px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.pulse-toggle:hover { border-color: rgba(0, 229, 255, 0.5); color: var(--cy); }
+
+.ticks {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  height: 34px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.tick { width: 3px; border-radius: 1px; background: var(--cy); opacity: 0.85; flex: none; }
+.tick.o-step { width: 5px; opacity: 0.55; }
+.tick.t-ok { background: var(--gn); }
+.tick.t-warn { background: var(--am); }
+.tick.t-err { background: var(--mg); }
+.pulse-meta { font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+.pulse-full { max-height: 210px; overflow: auto; border-bottom: 1px solid var(--line); padding: 8px 2px; }
+
+/* ── 上下文面板：概览大数字 ─────────────────────────── */
+.bigs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.big { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; }
+.big b { display: block; font: 600 26px/1.15 var(--mono); color: var(--text); }
+.big span { font-size: 11px; color: var(--dim); }
+.big.am b { color: var(--am); }
+.big.mg b { color: var(--mg); }
+.big.gn b { color: var(--gn); }
+
+.panel-head .x {
+  margin-left: auto;
+  background: transparent; border: 0;
+  color: var(--dim); font: inherit; font-size: 15px;
+  padding: 0 4px; cursor: pointer;
+}
+.panel-head .x:hover { color: var(--cy); }
+
+/* ── 顶栏视图切换 ──────────────────────────────────── */
+.seg { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; flex: none; }
+.seg-btn {
+  background: transparent; border: 0;
+  color: var(--dim); font: inherit; font-size: 12px;
+  padding: 5px 12px; cursor: pointer;
+}
+.seg-btn:hover { color: var(--cy); }
+.seg-btn.on { background: var(--panel-hi); color: var(--cy); }
+
+/* ── 任务详情（TaskDetail，两处复用） ───────────────── */
+.task-detail { font-size: 12px; line-height: 1.65; }
+.steps { font-family: var(--mono); font-size: 11px; margin-top: 2px; }
+.steps .step { display: flex; gap: 6px; }
+.steps .ic { width: 12px; opacity: 0.85; }
+.steps .tx { flex: 1; word-break: break-word; }
+.steps .tm { flex: none; }

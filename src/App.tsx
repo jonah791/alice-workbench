@@ -1,17 +1,44 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { busSnapshot, DEMO, dshRecover, dshStatus, onBusChanged } from "./api";
+import { buildPulses, buildStarMap } from "./starmap/layout";
 import type { DshStatus, LocalEvent, Snapshot } from "./types";
 import { ActionStream } from "./views/ActionStream";
 import { Cockpit } from "./views/Cockpit";
-import { NodePanel } from "./views/NodePanel";
+import { DetailPanel } from "./views/DetailPanel";
+import { PulseBar } from "./views/PulseBar";
+import { StarMap } from "./views/StarMap";
+import "./starmap/starmap.css";
 
+type Sel = { type: "node" | "task"; id: string } | null;
+
+/** 初始视图可以从地址栏给：`#view=list` · `#task=<taskId>` · `#node=<nodeId>`。
+ *  用途有二：① 让「某个任务 / 某个节点」可以被**直接指出来**（汇报、告警里贴链接）；
+ *  ② 给无头截图验收一条**可复现的状态入口**（点击态没法用 CLI 模拟，链接可以）。 */
+const readHash = (): { view: "map" | "list"; sel: Sel } => {
+  if (typeof window === "undefined") return { view: "map", sel: null };
+  const p = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const task = p.get("task");
+  const node = p.get("node");
+  return {
+    view: p.get("view") === "list" ? "list" : "map",
+    sel: task ? { type: "task", id: task } : node ? { type: "node", id: node } : null,
+  };
+};
+
+/** 星图为主视图（`docs/DESIGN.md` v0.2）；列表视图保留 v0.1 的名册 + 任务板。
+ *
+ *  视图体系：顶栏 HUD（状态）· 主区（星图 / 列表）· 右侧上下文面板（点谁看谁）·
+ *  底部脉冲条（行为图形化，点开才是全文）。**文字退到第二层，信息一条不少。** */
 export function App() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [dsh, setDsh] = useState<DshStatus | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [sel, setSel] = useState<Sel>(() => readHash().sel);
+  const [view, setView] = useState<"map" | "list">(() => readHash().view);
+  const [pulseOpen, setPulseOpen] = useState(false);
   const [local, setLocal] = useState<LocalEvent[]>([]);
   const [recovering, setRecovering] = useState(false);
   const [confirmRecover, setConfirmRecover] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
   const pushLocal = useCallback((text: string, tone: LocalEvent["tone"]) => {
     setLocal((l) => [...l.slice(-99), { atMs: Date.now(), text, tone }]);
@@ -52,6 +79,13 @@ export function App() {
     return () => window.clearInterval(id);
   }, []);
 
+  // 星图的「忙碌 / 新消息」判据依赖 now（布局本身是确定性的，与 now 无关）：
+  // 2s 走一格，够 20s 忙碌窗口用，且不产生任何模型调用。窗口休眠后自动追上真实时间。
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 2000);
+    return () => window.clearInterval(id);
+  }, []);
+
   /** 危险动作二次确认（spec §4.3）：一键恢复会调 `<workspace>/.dsh/init-dsh.ps1`，而该脚本
    *  第一步就是清理现有 DSH 进程——等于重启正在承载会话的运行时。故第一次点击只进入确认态
    *  （5 秒内再点一次才执行）：不弹窗、不打断流程，但误点一下不会造成重启。 */
@@ -77,15 +111,40 @@ export function App() {
       setRecovering(false);
     }
   };
+
   const nodes = snap?.nodes ?? [];
+  const tasks = snap?.tasks ?? [];
+  const steps = snap?.steps ?? [];
+  const actions = snap?.actions ?? [];
+  const messages = snap?.messages ?? [];
   const online = snap?.onlineCount ?? 0;
-  const node = nodes.find((n) => n.id === selected) ?? null;
+
+  const model = useMemo(
+    () => buildStarMap({ nodes, tasks, messages, actions, steps, now }),
+    [nodes, tasks, messages, actions, steps, now],
+  );
+  const pulses = useMemo(() => buildPulses(actions, steps, 64), [actions, steps]);
+
+  const selNode = sel?.type === "node" ? nodes.find((n) => n.id === sel.id) ?? null : null;
+  const selTask = sel?.type === "task" ? tasks.find((t) => t.taskId === sel.id) ?? null : null;
 
   return (
     <div className="app">
       <header className="hud">
         <div className="hud-title">
           爱丽丝工作台<span>多智能体 · 只读总线 · 零模型调用</span>
+        </div>
+        <div className="seg">
+          <button className={`seg-btn ${view === "map" ? "on" : ""}`} onClick={() => setView("map")} title="星图：看全局面">
+            星图
+          </button>
+          <button
+            className={`seg-btn ${view === "list" ? "on" : ""}`}
+            onClick={() => setView("list")}
+            title="列表：名册 + 任务一句话列表（星图看不清时用）"
+          >
+            列表
+          </button>
         </div>
         <div className="hud-spacer" />
         {DEMO && (
@@ -117,16 +176,44 @@ export function App() {
       </header>
 
       <div className="main">
-        <Cockpit
-          nodes={nodes}
-          tasks={snap?.tasks ?? []}
-          steps={snap?.steps ?? []}
-          selected={selected}
-          onSelect={setSelected}
+        <section className="stage">
+          {view === "map" ? (
+            <StarMap
+              model={model}
+              selectedStar={sel?.type === "node" ? sel.id : null}
+              selectedTask={sel?.type === "task" ? sel.id : null}
+              onPickStar={(id) => setSel({ type: "node", id })}
+              onPickTask={(id) => setSel({ type: "task", id })}
+              onClear={() => setSel(null)}
+            />
+          ) : (
+            <Cockpit
+              nodes={nodes}
+              tasks={tasks}
+              steps={steps}
+              selected={selNode?.id ?? null}
+              onSelect={(id) => setSel({ type: "node", id })}
+            />
+          )}
+        </section>
+
+        <DetailPanel
+          sel={sel}
+          model={model}
+          pulses={pulses}
+          node={selNode}
+          task={selTask}
+          steps={steps}
+          actions={actions}
+          messages={messages}
+          onLocal={pushLocal}
+          onClear={() => setSel(null)}
         />
-        <NodePanel node={node} actions={snap?.actions ?? []} messages={snap?.messages ?? []} onLocal={pushLocal} />
-        <ActionStream actions={snap?.actions ?? []} local={local} messages={snap?.messages ?? []} />
       </div>
+
+      <PulseBar pulses={pulses} now={now} expanded={pulseOpen} onToggle={() => setPulseOpen((v) => !v)}>
+        <ActionStream actions={actions} local={local} messages={messages} />
+      </PulseBar>
     </div>
   );
 }

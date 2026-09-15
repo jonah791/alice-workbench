@@ -70,12 +70,13 @@ body::before {
 
 @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 
-/* ── 主体三列 ─────────────────────────────────────── */
+/* ── 主体布局 ─────────────────────────────────────── */
+/* v0.1 是三列（名册 / 详情 / 事件流）；v0.2 起主区是**星图**，列宽由 starmap.css 覆盖。 */
 .main {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 268px minmax(0, 1fr) 372px;
+  grid-template-columns: minmax(0, 1fr) 372px;
 }
 .panel { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
 .panel:last-child { border-right: none; }
