@@ -70,6 +70,15 @@ body::before {
 
 @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 
+/* ── 不看它的时候不许烧 GPU（2026-09-15 主人「影响我玩游戏了」） ──────────
+   `body.idle` = 窗口可见但**没有焦点**，或已被切到后台/最小化（App.tsx 的 useActivity）。
+   动画继续跑会让 WebView2 合成器永远不休眠——实测工作台占 208 CPU 秒/小时，
+   主人在全屏游戏里会被它拖出微卡顿。暂停全部装饰性动画，回到前台立刻恢复。 */
+body.idle .star .pulse,
+body.idle .dot.on,
+body.idle .link.fresh,
+body.idle .ev.fresh { animation-play-state: paused; }
+
 /* ── 主体布局 ─────────────────────────────────────── */
 /* v0.1 是三列（名册 / 详情 / 事件流）；v0.2 起主区是**星图**，列宽由 starmap.css 覆盖。 */
 .main {

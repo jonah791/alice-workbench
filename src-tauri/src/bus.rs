@@ -11,12 +11,18 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// 心跳超过此时长视为离线（与插件 `DEFAULT_OFFLINE_AFTER_MS` 一致）
 pub const OFFLINE_AFTER_MS: u64 = 30_000;
 /// 轮询间隔
 const POLL_MS: u64 = 150;
+/// 窗口在但**没焦点**（副屏余光 / 被别的窗口压着）：降到 ~1/5 频率。
+const POLL_MS_UNFOCUSED: u64 = 700;
+/// 最小化 / 隐藏：降到 ~1/16 频率。
+/// **主人在游戏时不该被我们烧 CPU**——2026-09-15 实测：常驻 150ms 全量扫描 ≈ **14% 一个核**
+/// （8.2 CPU 秒/分钟），是工作台最大的耗电项（主人「影响我玩游戏了」）。
+const POLL_MS_IDLE: u64 = 2500;
 /// 行为流保留条数（新→旧）
 const TRACE_TAIL: usize = 300;
 /// 消息列表保留条数（新→旧）
@@ -581,20 +587,59 @@ pub fn send_message(to: String, text: String, kind: Option<String>) -> Result<St
     Ok(id)
 }
 
-/// 后台轮询：指纹变化 → 推 `bus-changed`。回调全程兜底（§5.24：逃逸异常会杀宿主）。
+/// 活跃度 → 轮询周期（**纯函数，可离线测**）。
+/// 有焦点 = 正被使用（P1-4 判据要求 1s 内响应，150ms 留足余量）；
+/// 没焦点 / 最小化 = 没人在看，降频即可（前端回到前台会立刻补一次快照，不会看到旧数据）。
+fn poll_cadence_ms(hidden: bool, focused: bool) -> u64 {
+    if hidden {
+        POLL_MS_IDLE
+    } else if focused {
+        POLL_MS
+    } else {
+        POLL_MS_UNFOCUSED
+    }
+}
+
+/// 后台轮询：**指纹先行** → 变化了才做全量快照 → 推 `bus-changed`。
+///
+/// 为什么指纹先行：`snapshot()` 会做 4 次全量扫描（nodes / messages / tasks / actions），
+/// 而 `fingerprint()` 只走一遍目录元数据；稳态（总线没动）下前者是白烧的 CPU。
+/// 指纹覆盖的目录（`nodes`/`state`/`mailbox/*`/`tasks`/`logs/actions`/`cluster-trace.jsonl`）
+/// 与快照读取的数据源一致，因此**短路安全**——不会漏推送。
+/// 回调全程兜底（§5.24：逃逸异常会杀宿主）。
 pub fn start_watch(app: AppHandle) {
     std::thread::spawn(move || {
         let dir = bus_dir();
         let mut last = String::new();
         loop {
-            std::thread::sleep(Duration::from_millis(POLL_MS));
-            let result = std::panic::catch_unwind(|| snapshot(&dir));
-            match result {
+            let (hidden, focused) = match app.get_webview_window("main") {
+                Some(w) => (
+                    w.is_minimized().unwrap_or(false) || !w.is_visible().unwrap_or(true),
+                    w.is_focused().unwrap_or(true),
+                ),
+                None => (false, true),
+            };
+            std::thread::sleep(Duration::from_millis(poll_cadence_ms(hidden, focused)));
+            // 便宜的前置判据：指纹没变 = 总线没动 ⇒ 跳过昂贵的全量扫描
+            match std::panic::catch_unwind(|| fingerprint(&dir)) {
+                Ok(fp) if fp == last => continue,
+                Ok(_) => { /* 变了：走完整快照 */ }
+                Err(_) => {
+                    eprintln!("[alice-workbench] fingerprint panicked; continuing");
+                    continue;
+                }
+            }
+            match std::panic::catch_unwind(|| snapshot(&dir)) {
                 Ok(snap) => {
                     if snap.fingerprint != last {
                         last = snap.fingerprint.clone();
-                        if let Err(e) = app.emit("bus-changed", &snap) {
-                            eprintln!("[alice-workbench] emit failed: {e}");
+                        // 窗口隐藏（最小化/被全屏游戏压住）时**不推送**：前端回到前台会自己补一次快照
+                        // （`App.tsx` 的 active effect）⇒ 不会看到陈旧界面，却能省掉渲染器被唤醒重绘的开销。
+                        // 实测（2026-09-15）：最小化态 2.95 CPU 秒/分钟，比不推送的等价路径高一个量级。
+                        if !hidden {
+                            if let Err(e) = app.emit("bus-changed", &snap) {
+                                eprintln!("[alice-workbench] emit failed: {e}");
+                            }
                         }
                     }
                 }
@@ -809,6 +854,20 @@ mod tests {
         fs::create_dir_all(d.join("logs").join("actions")).unwrap();
         fs::write(d.join("logs").join("actions").join("a-3.jsonl"), "{}\n").unwrap();
         assert_ne!(before, fingerprint(&d), "节点干活时界面必须收到推送");
+    }
+
+    #[test]
+    fn poll_cadence_is_activity_aware() {
+        // 有焦点 = 全速（P1-4 的 1s 判据靠它）
+        assert_eq!(poll_cadence_ms(false, true), POLL_MS);
+        assert_eq!(POLL_MS, 150);
+        // 没焦点 = 降频但不休眠（副屏余光也要活着）
+        assert_eq!(poll_cadence_ms(false, false), POLL_MS_UNFOCUSED);
+        // 隐藏 / 最小化 = 最省（主人在游戏）
+        assert_eq!(poll_cadence_ms(true, false), POLL_MS_IDLE);
+        assert_eq!(poll_cadence_ms(true, true), POLL_MS_IDLE, "最小化优先于焦点：看不见就不必快");
+        // 三者必须严格递减：这条不变量被破坏 = 节能策略失效（静默退化）
+        assert!(POLL_MS < POLL_MS_UNFOCUSED && POLL_MS_UNFOCUSED < POLL_MS_IDLE);
     }
 
     #[test]

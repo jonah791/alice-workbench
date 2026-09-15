@@ -60,3 +60,25 @@ if (Test-Port $Port) {
     Write-Host ("page target: 「" + $page.title + "」 " + $page.url)
   } catch { Write-Host ("page target: 读取失败 " + $_.Exception.Message) }
 }
+
+# ---- 4) 全部降为 BelowNormal：游戏/前台应用永远优先（2026-09-15 主人「影响我玩游戏了」）----
+# 为什么在脚本里而不是临场敲：这是**每次启动都该成立**的状态，靠记得 = 迟早忘。
+$roots = @()
+$wb = Get-Process alice-workbench -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($wb) { $roots += [int]$wb.Id }
+Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+  Where-Object { $_.CommandLine -like '*vite*' -or $_.CommandLine -like '*pnpm*' } |
+  ForEach-Object { $roots += [int]$_.ProcessId }
+$all = Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId
+$set = New-Object 'System.Collections.Generic.HashSet[int]'
+foreach ($r in $roots) { [void]$set.Add($r) }
+$changed = $true
+while ($changed) {
+  $changed = $false
+  foreach ($p in $all) {
+    if ($set.Contains([int]$p.ParentProcessId) -and -not $set.Contains([int]$p.ProcessId)) { [void]$set.Add([int]$p.ProcessId); $changed = $true }
+  }
+}
+$ok = 0
+foreach ($id in $set) { try { (Get-Process -Id $id -ErrorAction Stop).PriorityClass = 'BelowNormal'; $ok++ } catch { } }
+Write-Host ("优先级    : " + $ok + " 个进程已降为 BelowNormal（游戏永远优先）")

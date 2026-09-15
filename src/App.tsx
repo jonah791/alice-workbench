@@ -27,6 +27,34 @@ const readHash = (): { view: "map" | "list"; sel: Sel } => {
   };
 };
 
+/** 活跃度（**可见 + 有焦点**才算「在用」）：驱动轮询节流与 `body.idle` 动画暂停。
+ *
+ *  2026-09-15 主人「电脑操作能不能在后台完成？影响我玩游戏了」——
+ *  实测工作台一小时烧 208 CPU 秒（星图持续动画 + 2s 重渲染 + Rust 侧 150ms 扫总线），
+ *  主人在全屏游戏里会被它拖出微卡顿。**不看它的时候，它不该烧 CPU/GPU。** */
+function useActivity(): { active: boolean; visible: boolean } {
+  const [state, setState] = useState(() => ({
+    active: typeof document !== "undefined" && !document.hidden && document.hasFocus(),
+    visible: typeof document !== "undefined" && !document.hidden,
+  }));
+  useEffect(() => {
+    const read = () => setState({ active: !document.hidden && document.hasFocus(), visible: !document.hidden });
+    window.addEventListener("visibilitychange", read);
+    window.addEventListener("focus", read);
+    window.addEventListener("blur", read);
+    read();
+    return () => {
+      window.removeEventListener("visibilitychange", read);
+      window.removeEventListener("focus", read);
+      window.removeEventListener("blur", read);
+    };
+  }, []);
+  useEffect(() => {
+    document.body.classList.toggle("idle", !state.active);
+  }, [state.active]);
+  return state;
+}
+
 /** 星图为主视图（`docs/DESIGN.md` v0.2）；列表视图保留 v0.1 的名册 + 任务板。
  *
  *  视图体系：顶栏 HUD（状态）· 主区（星图 / 列表）· 右侧上下文面板（点谁看谁）·
@@ -61,19 +89,32 @@ export function App() {
     };
   }, [pushLocal]);
 
+  // 活跃度驱动节流（见上方 useActivity）：有焦点=全速 · 可见无焦点=余光（15s）· 后台=没人看（60s）
+  const { active, visible } = useActivity();
+
   // 兜底轮询：事件通道是「快路」（<1s），但权限被拒、监听丢失、窗口休眠都可能让它静默失效。
   // 低频轮询保证 UI 永远能在数秒内回到真实状态——**两条路都比一条路可靠**（对照 §5.24 兜底纪律）。
   useEffect(() => {
     if (DEMO) return;
+    const periodMs = active ? 3000 : visible ? 15_000 : 60_000;
     const id = window.setInterval(() => {
       busSnapshot()
         .then(setSnap)
         .catch(() => undefined);
-    }, 3000);
+    }, periodMs);
     return () => window.clearInterval(id);
-  }, []);
+  }, [active, visible]);
 
-  // DSH 运行时状态：纯本地探测（TCP + 文件），10s 一次
+  // 回到前台立刻补一次快照：Rust 侧在无焦点/最小化时会**降频轮询**（节能），
+  // 不能等它下一拍——否则切回来的第一眼是旧数据。
+  useEffect(() => {
+    if (!active || DEMO) return;
+    busSnapshot()
+      .then(setSnap)
+      .catch(() => undefined);
+  }, [active]);
+
+  // DSH 运行时状态：纯本地探测（TCP + 文件）
   useEffect(() => {
     const tick = () => {
       dshStatus()
@@ -81,16 +122,16 @@ export function App() {
         .catch(() => setDsh(null));
     };
     tick();
-    const id = window.setInterval(tick, 10_000);
+    const id = window.setInterval(tick, active ? 10_000 : 60_000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [active]);
 
   // 星图的「忙碌 / 新消息」判据依赖 now（布局本身是确定性的，与 now 无关）：
   // 2s 走一格，够 20s 忙碌窗口用，且不产生任何模型调用。窗口休眠后自动追上真实时间。
   useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 2000);
+    const id = window.setInterval(() => setNow(Date.now()), active ? 2000 : visible ? 10_000 : 30_000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [active, visible]);
 
   /** 危险动作二次确认（spec §4.3）：一键恢复会调 `<workspace>/.dsh/init-dsh.ps1`，而该脚本
    *  第一步就是清理现有 DSH 进程——等于重启正在承载会话的运行时。故第一次点击只进入确认态
