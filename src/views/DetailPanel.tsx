@@ -2,11 +2,17 @@ import type { Pulse, StarMapModel } from "../starmap/layout";
 import type { ActionEvent, MessageInfo, NodeInfo, StepEvent, TaskInfo } from "../types";
 import { TaskDetail } from "../components/TaskDetail";
 import { NodePanel } from "./NodePanel";
+import { TaskComposer } from "./Starter";
 
 /** 右侧上下文面板 —— 「点谁看谁」（`docs/DESIGN.md` §3 第 3 项）。
  *
  *  文字纪律：**长文本只住在这里**，且必须点选后才出现。三态：
  *    概览（默认）· 任务详情 · 节点详情（复用 `NodePanel`，含发消息入口）。
+ *
+ *  v0.3（2026-09-15，主人判「没有可用性」后）：
+ *  ① 概览改为**动作优先**——先给「派一件事」，再给现状数字；
+ *  ② **稀疏态下不再重复表单**：此时动作集中在主区的起步卡（空间大、看得清），
+ *     侧栏只留现状与最近行为，避免同一屏两个一模一样的输入框把视线劈成两半。
  *
  *  取消选择：点星图空白处，或点标题栏的 ×。 */
 
@@ -28,6 +34,8 @@ export function DetailPanel({
   steps,
   actions,
   messages,
+  nodes,
+  sparse,
   onLocal,
   onClear,
 }: {
@@ -39,6 +47,9 @@ export function DetailPanel({
   steps: StepEvent[];
   actions: ActionEvent[];
   messages: MessageInfo[];
+  nodes: NodeInfo[];
+  /** 稀疏态：动作交给主区起步卡，这里不再重复一份表单。 */
+  sparse: boolean;
   onLocal: (text: string, tone: "info" | "ok" | "warn" | "err") => void;
   onClear: () => void;
 }) {
@@ -75,6 +86,20 @@ export function DetailPanel({
         <span className="dim">{stats.total} 节点</span>
       </header>
       <div className="panel-body">
+        {/* 动作优先：有活在干时，这里就是最顺手的派活入口。
+            稀疏态则让位给主区起步卡——**同一屏不出现两份同样的表单**。 */}
+        {!sparse && (
+          <div className="act-block">
+            <div className="hint" style={{ marginBottom: 6 }}>
+              派一件事
+            </div>
+            <TaskComposer nodes={nodes} defaultTargetId={model.coreId} onLocal={onLocal} compact />
+          </div>
+        )}
+
+        <div className="hint" style={{ margin: sparse ? "0 0 6px" : "14px 0 6px" }}>
+          现状
+        </div>
         <div className="bigs">
           <div className="big">
             <b>{stats.online}</b>

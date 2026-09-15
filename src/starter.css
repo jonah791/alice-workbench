@@ -1,0 +1,117 @@
+/* 起步层与派活输入框（稀疏态专用）。
+   设计纪律：卡**压在星图之上**而不是替换它——空网格仍在后面，提醒「这里本来会有东西」。 */
+
+.starter {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  pointer-events: none; /* 空白区仍可点到星图（取消选择） */
+}
+
+.starter-card {
+  pointer-events: auto;
+  width: min(560px, 92%);
+  background: rgba(18, 22, 31, 0.95);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px 18px 14px;
+  box-shadow: 0 20px 56px rgba(0, 0, 0, 0.55);
+}
+
+.starter-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.starter-head b {
+  font-size: 15px;
+  letter-spacing: 0.3px;
+}
+.starter-head .dim {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.starter-lead {
+  margin: 4px 0 12px;
+  color: var(--dim);
+  font-size: 12.5px;
+  line-height: 1.75;
+}
+.starter-lead b {
+  color: var(--cy);
+}
+
+.starter-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* ---- 派活输入框（起步层与右侧面板共用） ---- */
+.act-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.act-row {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.act-row select,
+.act-row input {
+  background: var(--panel-hi);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+.act-row select {
+  max-width: 190px;
+}
+.act-row .act-intent,
+.act-row .act-acc {
+  flex: 1;
+}
+.act-row input::placeholder {
+  color: var(--weak);
+}
+.act-row input:focus,
+.act-row select:focus {
+  outline: none;
+  border-color: rgba(0, 229, 255, 0.45);
+}
+.act-hint {
+  font-size: 11px;
+}
+
+/* 右侧面板里空间窄：纵向堆叠 */
+.act-form.compact .act-row {
+  flex-direction: column;
+}
+.act-form.compact .act-row select {
+  max-width: none;
+}
+
+/* 概览里的动作块：与上下文面板其余部分用同一条分隔线区分开 */
+.act-block {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel-hi);
+  padding: 10px;
+}
+
+/* 起步层是绝对定位叠层，主区必须成为定位上下文 */
+.stage {
+  position: relative;
+}
+

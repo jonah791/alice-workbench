@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { busSnapshot, DEMO, dshRecover, dshStatus, onBusChanged } from "./api";
-import { buildPulses, buildStarMap } from "./starmap/layout";
+import { buildPulses, buildStarMap, isSparse } from "./starmap/layout";
 import type { DshStatus, LocalEvent, Snapshot } from "./types";
 import { ActionStream } from "./views/ActionStream";
 import { Cockpit } from "./views/Cockpit";
 import { DetailPanel } from "./views/DetailPanel";
 import { PulseBar } from "./views/PulseBar";
 import { StarMap } from "./views/StarMap";
+import { Starter } from "./views/Starter";
 import "./starmap/starmap.css";
+import "./starter.css";
 
 type Sel = { type: "node" | "task"; id: string } | null;
 
@@ -28,7 +30,11 @@ const readHash = (): { view: "map" | "list"; sel: Sel } => {
 /** 星图为主视图（`docs/DESIGN.md` v0.2）；列表视图保留 v0.1 的名册 + 任务板。
  *
  *  视图体系：顶栏 HUD（状态）· 主区（星图 / 列表）· 右侧上下文面板（点谁看谁）·
- *  底部脉冲条（行为图形化，点开才是全文）。**文字退到第二层，信息一条不少。** */
+ *  底部脉冲条（行为图形化，点开才是全文）。**文字退到第二层，信息一条不少。**
+ *
+ *  v0.3（2026-09-15，主人判「没有可用性」后）：补**动作层**——
+ *  ① 稀疏态下主区叠**起步层**（现状一句话 + 派任务），空系统也要回答「我能做什么」；
+ *  ② 右侧概览从「只有数字」改为「派一件事 + 现状」动作优先。 */
 export function App() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [dsh, setDsh] = useState<DshStatus | null>(null);
@@ -124,6 +130,8 @@ export function App() {
     [nodes, tasks, messages, actions, steps, now],
   );
   const pulses = useMemo(() => buildPulses(actions, steps, 64), [actions, steps]);
+  /** 稀疏态：没有别人在干活、也没有待办 ⇒ 主区叠起步层（判据在 layout.ts，纯函数可单测）。 */
+  const sparse = isSparse(model.stats);
 
   const selNode = sel?.type === "node" ? nodes.find((n) => n.id === sel.id) ?? null : null;
   const selTask = sel?.type === "task" ? tasks.find((t) => t.taskId === sel.id) ?? null : null;
@@ -132,7 +140,7 @@ export function App() {
     <div className="app">
       <header className="hud">
         <div className="hud-title">
-          爱丽丝工作台<span>多智能体 · 只读总线 · 零模型调用</span>
+          爱丽丝工作台<span>多智能体 · 可派任务 · 零模型调用</span>
         </div>
         <div className="seg">
           <button className={`seg-btn ${view === "map" ? "on" : ""}`} onClick={() => setView("map")} title="星图：看全局面">
@@ -178,14 +186,24 @@ export function App() {
       <div className="main">
         <section className="stage">
           {view === "map" ? (
-            <StarMap
-              model={model}
-              selectedStar={sel?.type === "node" ? sel.id : null}
-              selectedTask={sel?.type === "task" ? sel.id : null}
-              onPickStar={(id) => setSel({ type: "node", id })}
-              onPickTask={(id) => setSel({ type: "task", id })}
-              onClear={() => setSel(null)}
-            />
+            <>
+              <StarMap
+                model={model}
+                selectedStar={sel?.type === "node" ? sel.id : null}
+                selectedTask={sel?.type === "task" ? sel.id : null}
+                onPickStar={(id) => setSel({ type: "node", id })}
+                onPickTask={(id) => setSel({ type: "task", id })}
+                onClear={() => setSel(null)}
+              />
+              {sparse && (
+                <Starter
+                  model={model}
+                  nodes={nodes}
+                  onLocal={pushLocal}
+                  onShowList={() => setView("list")}
+                />
+              )}
+            </>
           ) : (
             <Cockpit
               nodes={nodes}
@@ -206,6 +224,8 @@ export function App() {
           steps={steps}
           actions={actions}
           messages={messages}
+          nodes={nodes}
+          sparse={sparse}
           onLocal={pushLocal}
           onClear={() => setSel(null)}
         />

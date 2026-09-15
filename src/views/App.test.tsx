@@ -91,4 +91,14 @@ describe("工作台视图接线", () => {
     // 退役的**不占星位**：演示数据 4 个节点（1 在线 + 1 近期离线 + 1 退役 + 1 主脑）⇒ 星数 = 3
     expect(container.querySelectorAll("g.star").length).toBe(3);
   });
+
+  it("概览动作优先：默认态就给「派一件事」入口，且**有活时不出起步层**（v0.3）", async () => {
+    const { container } = render(<App />);
+    await waitFor(() => expect(container.textContent).toContain("概览"));
+    expect(container.textContent).toContain("派一件事");
+    expect(container.textContent).toContain("投递任务");
+    expect(container.textContent).toContain("现状");
+    // 演示数据有未收尾任务 ⇒ 不是稀疏态，起步层不该压在有活的星图上
+    expect(container.querySelector(".starter")).toBeNull();
+  });
 });

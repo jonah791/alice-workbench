@@ -99,6 +99,15 @@ export interface StarMapStats {
   retired: number;
 }
 
+/** 「稀疏态」判据（2026-09-15 主人判「没有可用性」的根因之一）。
+ *
+ *  总线里**没有别人在干活、也没有待办**时，界面必须教人「怎么开始」，
+ *  而不是展示一片空网格——空系统暴露的不是数据问题，是**引导缺失**。
+ *  纯函数 ⇒ 可离线单测；阈值只此一处。 */
+export function isSparse(stats: StarMapStats): boolean {
+  return stats.online <= 2 && stats.openTasks === 0;
+}
+
 /** 退役节点聚合标记：不占星位，但**不隐藏**——数量在外，名字在悬停里，全量在列表视图。 */
 export interface RetiredMarker {
   count: number;
