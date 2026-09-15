@@ -83,4 +83,12 @@ describe("工作台视图接线", () => {
     await waitFor(() => expect(container.querySelector(".pulse-full")).toBeTruthy());
     expect(container.querySelector(".pulse-full")!.textContent).toContain("实时行为流");
   });
+
+  it("退役节点聚成一个计数标记（真实总线上有 14 个墓碑心跳）", async () => {
+    const { container } = render(<App />);
+    await waitFor(() => expect(container.querySelector("g.retired")).toBeTruthy());
+    expect(container.querySelector("g.retired text.badge")?.textContent).toBe("1");
+    // 退役的**不占星位**：演示数据 4 个节点（1 在线 + 1 近期离线 + 1 退役 + 1 主脑）⇒ 星数 = 3
+    expect(container.querySelectorAll("g.star").length).toBe(3);
+  });
 });

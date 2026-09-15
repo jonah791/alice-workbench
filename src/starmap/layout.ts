@@ -29,6 +29,10 @@ const MIN_SEP = 0.22;
 export const BUSY_WINDOW_MS = 20_000;
 /** 多久内的消息光弧算「新」。 */
 export const FRESH_LINK_MS = 8_000;
+/** 离线超过这么久 ⇒ 判「退役」：不占星位，聚成一个计数标记。
+ *  判据来自真实总线实测（2026-09-15：15 个心跳文件里 14 个是昨天重启留下的墓碑）——
+ *  让墓碑占满外环，就把「谁还活着」这个唯一重要的事实淹掉了。 */
+export const RETIRE_AFTER_MS = 6 * 3600_000;
 const MAX_LINKS = 24;
 
 export type StarState = "core" | "busy" | "online" | "offline" | "fault";
@@ -91,6 +95,17 @@ export interface StarMapStats {
   openTasks: number;
   failedTasks: number;
   unverified: number;
+  /** 退役（离线 > `RETIRE_AFTER_MS`）节点数——它们不占星位，只聚成一个标记。 */
+  retired: number;
+}
+
+/** 退役节点聚合标记：不占星位，但**不隐藏**——数量在外，名字在悬停里，全量在列表视图。 */
+export interface RetiredMarker {
+  count: number;
+  x: number;
+  y: number;
+  r: number;
+  names: string[];
 }
 
 export interface StarMapModel {
@@ -102,6 +117,7 @@ export interface StarMapModel {
   stars: Star[];
   satellites: Satellite[];
   links: Link[];
+  retired: RetiredMarker | null;
   stats: StarMapStats;
 }
 
@@ -151,10 +167,16 @@ const isFailedStatus = (s: string): boolean => s === "failed" || s === "blocked"
 export function buildStarMap(input: StarMapInput): StarMapModel {
   const { nodes, tasks, messages, actions, steps, now } = input;
 
-  // ── 中央恒星：主脑优先，其次最新在线的 web 节点，最后第一个节点 ──
-  const byRole = nodes.find((n) => (n.role ?? "").includes("主脑"));
-  const byProfile = nodes.find((n) => n.online && n.profile === "web");
-  const core = byRole ?? byProfile ?? nodes[0] ?? null;
+  // ── 中央恒星：**在线的**主脑优先 ──
+  //    不看在线状态的话，中央可能立着一颗死星：真实总线上有 13 个昨天重启留下的
+  //    `web-0` 墓碑心跳文件（2026-09-15 实测：15 个文件里只有 1 个活着）。
+  const isMain = (n: NodeInfo) => (n.role ?? "").includes("主脑");
+  const core =
+    nodes.find((n) => isMain(n) && n.online) ??
+    nodes.find(isMain) ??
+    nodes.find((n) => n.online && n.profile === "web") ??
+    nodes[0] ??
+    null;
 
   // ── 忙碌：最近 BUSY_WINDOW_MS 内有行为事件的节点 ──
   const busy = new Set<string>();
@@ -171,9 +193,13 @@ export function buildStarMap(input: StarMapInput): StarMapModel {
     perStar.set(owner, list);
   }
 
+  // 退役分离：离线超过 RETIRE_AFTER_MS 的节点不占星位（见常量处的实测理由）。
   const others = nodes.filter((n) => n.id !== core?.id);
-  const onlineIds = others.filter((n) => n.online).map((n) => n.id);
-  const offlineIds = others.filter((n) => !n.online).map((n) => n.id);
+  const retiredNodes = others.filter((n) => !n.online && Number.isFinite(n.ageMs) && n.ageMs >= RETIRE_AFTER_MS);
+  const retiredIds = new Set(retiredNodes.map((n) => n.id));
+  const live = others.filter((n) => !retiredIds.has(n.id));
+  const onlineIds = live.filter((n) => n.online).map((n) => n.id);
+  const offlineIds = live.filter((n) => !n.online).map((n) => n.id);
   const angOnline = spreadAngles(onlineIds);
   const angOffline = spreadAngles(offlineIds);
 
@@ -199,7 +225,7 @@ export function buildStarMap(input: StarMapInput): StarMapModel {
     });
   }
 
-  for (const n of others) {
+  for (const n of live) {
     const own = perStar.get(n.id) ?? [];
     const onRing = n.online;
     const angle = (onRing ? angOnline : angOffline).get(n.id) ?? hashUnit(n.id) * Math.PI * 2;
@@ -286,6 +312,19 @@ export function buildStarMap(input: StarMapInput): StarMapModel {
     });
   }
 
+  // ── 退役标记：外环 12 点钟方向放一个虚线环 + 计数（不挤中央、不遮光弧） ──
+  const retiredPos = polar(CX, CY, R_OFFLINE, -Math.PI / 2);
+  const retired: RetiredMarker | null =
+    retiredNodes.length > 0
+      ? {
+          count: retiredNodes.length,
+          x: retiredPos.x,
+          y: retiredPos.y,
+          r: 13,
+          names: retiredNodes.map((n) => n.displayName || n.id),
+        }
+      : null;
+
   return {
     w: VIEW_W,
     h: VIEW_H,
@@ -295,6 +334,7 @@ export function buildStarMap(input: StarMapInput): StarMapModel {
     stars,
     satellites,
     links,
+    retired,
     stats: {
       online: nodes.filter((n) => n.online).length,
       total: nodes.length,
@@ -302,6 +342,7 @@ export function buildStarMap(input: StarMapInput): StarMapModel {
       openTasks: tasks.filter((t) => isOpenStatus(t.status)).length,
       failedTasks: tasks.filter((t) => isFailedStatus(t.status)).length,
       unverified: tasks.reduce((acc, t) => acc + (t.unverifiedCount > 0 ? 1 : 0), 0),
+      retired: retiredNodes.length,
     },
   };
 }

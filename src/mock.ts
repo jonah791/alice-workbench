@@ -64,6 +64,23 @@ export function mockSnapshot(): Snapshot {
         atMs: base - 2_640_000,
         startedAt: base - 2_700_000,
       },
+      {
+        // 退役样本（离线 2 天 > RETIRE_AFTER_MS）：演示数据必须覆盖「退役聚合」这条路径，
+        // 否则真总线上一圈墓碑（实测 15 个心跳文件里 14 个是墓碑）时才发现没实现。
+        id: "DEMO-host-web-0-9999",
+        displayName: "web-0（退役）",
+        online: false,
+        ageMs: 172_800_000,
+        role: "主脑",
+        profile: "web",
+        harness: null,
+        pid: 9999,
+        host: "DEMO-host",
+        port: null,
+        workspace: WORKSPACE_PLACEHOLDER,
+        atMs: base - 172_800_000,
+        startedAt: base - 173_000_000,
+      },
     ],
     messages: [
       {

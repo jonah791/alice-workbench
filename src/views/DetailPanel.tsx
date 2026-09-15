@@ -113,6 +113,12 @@ export function DetailPanel({
           </>
         )}
 
+        {stats.retired > 0 && (
+          <div className="hint" style={{ marginTop: 12 }}>
+            {stats.retired} 个退役节点（离线 &gt; 6h）不占星位——完整名册见<b>列表</b>视图
+          </div>
+        )}
+
         <div className="hint" style={{ marginTop: 16, lineHeight: 1.8 }}>
           点<b>星</b>看节点 · 点<b>卫星</b>看任务 · 点空白回到这里
         </div>

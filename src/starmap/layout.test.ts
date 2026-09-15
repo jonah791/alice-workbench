@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ActionEvent, MessageInfo, NodeInfo, StepEvent, TaskInfo } from "../types";
-import { BUSY_WINDOW_MS, R_OFFLINE, R_ONLINE, SAT_ORBIT_GAP, buildPulses, buildStarMap, hashUnit, type StarMapInput } from "./layout";
+import { BUSY_WINDOW_MS, RETIRE_AFTER_MS, R_OFFLINE, R_ONLINE, SAT_ORBIT_GAP, buildPulses, buildStarMap, hashUnit, type StarMapInput } from "./layout";
 
 /** 星图布局的聚焦测试。选判据的标准：**能证伪「星图看起来对但其实错」的那些**——
  *  位置确定性（否则星星每 2s 跳一次）、坐标有限性（NaN 会让星直接消失）、
@@ -147,7 +147,7 @@ describe("星图布局", () => {
     const m = buildStarMap(input({ nodes: [] }));
     expect(m.stars).toHaveLength(0);
     expect(m.satellites).toHaveLength(0);
-    expect(m.stats).toEqual({ online: 0, total: 0, busy: 0, openTasks: 0, failedTasks: 0, unverified: 0 });
+    expect(m.stats).toEqual({ online: 0, total: 0, busy: 0, openTasks: 0, failedTasks: 0, unverified: 0, retired: 0 });
   });
 
   it("hashUnit 稳定且落在 [0,1)", () => {
@@ -158,6 +158,26 @@ describe("星图布局", () => {
       expect(v).toBeGreaterThanOrEqual(0);
       expect(v).toBeLessThan(1);
     }
+  });
+
+  it("退役聚合：离线 > 6h 的节点不占星位，只计数（墓碑不许淹掉「谁还活着」）", () => {
+    const old = mkNode({ id: "ghost-old", displayName: "ghost-old", online: false, ageMs: RETIRE_AFTER_MS + 1000 });
+    const recent = mkNode({ id: "ghost-recent", displayName: "ghost-recent", online: false, ageMs: RETIRE_AFTER_MS - 1000 });
+    const m = buildStarMap(input({ nodes: [...baseNodes, old, recent] }));
+    expect(m.stars.some((s) => s.id === "ghost-old")).toBe(false); // 退役：不占星位
+    expect(m.stars.some((s) => s.id === "ghost-recent")).toBe(true); // 近期离线：仍是一颗星（可行动）
+    expect(m.retired?.count).toBe(1);
+    expect(m.retired?.names).toContain("ghost-old");
+    expect(m.stats.retired).toBe(1);
+  });
+
+  it("中央恒星优先在线：真总线的形状（多个同名主脑文件，只有最新那个活着）", () => {
+    const nodes: NodeInfo[] = [
+      mkNode({ id: "h-web-0-old", displayName: "web-0", role: "主脑", profile: "web", online: false, ageMs: 955 * 60_000 }),
+      mkNode({ id: "h-web-0-99999", displayName: "web-0", role: "主脑", profile: "web", online: true, ageMs: 200 }),
+    ];
+    const m = buildStarMap(input({ nodes }));
+    expect(m.coreId).toBe("h-web-0-99999"); // 不许把一颗死星立在中央
   });
 });
 

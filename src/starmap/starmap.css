@@ -63,6 +63,18 @@
 .sat .unverified { fill: none; stroke: var(--am); stroke-width: 1.1; stroke-dasharray: 2 2; }
 .sat:hover .body, .sat.sel .body { stroke: #ffffff; stroke-width: 1.6; }
 
+/* 退役节点聚合标记：虚线环 + 计数（不占星位，但看得见） */
+.retired .body { fill: rgba(255, 255, 255, 0.02); stroke: #39414d; stroke-width: 1; stroke-dasharray: 3 3; }
+.retired .badge {
+  fill: var(--weak);
+  font: 11px var(--mono);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: #0a0e14;
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+
 /* 图例：天体语义的唯一说明（文字纪律的例外，压到一行） */
 .legend {
   position: absolute;

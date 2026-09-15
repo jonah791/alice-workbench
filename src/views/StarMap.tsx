@@ -87,6 +87,26 @@ export function StarMap({
           ))}
         </g>
 
+        {/* 退役节点：聚成一个计数标记（不占星位，但**不隐藏**——名字在悬停里，全量在列表视图） */}
+        {model.retired && (
+          <g className="retired">
+            <circle className="body" cx={model.retired.x} cy={model.retired.y} r={model.retired.r} />
+            <text className="badge" x={model.retired.x} y={model.retired.y + 4}>
+              {model.retired.count}
+            </text>
+            <title>
+              {[
+                `${model.retired.count} 个退役节点（离线 > 6h，不占星位）`,
+                ...model.retired.names.slice(0, 8),
+                model.retired.names.length > 8 ? "…" : "",
+                "完整名册见列表视图",
+              ]
+                .filter(Boolean)
+                .join("\n")}
+            </title>
+          </g>
+        )}
+
         {/* 恒星：节点 */}
         <g className="stars">
           {stars.map((st) => (
