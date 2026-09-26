@@ -7,9 +7,13 @@
   本脚本经 **WMI（Win32_Process.Create）** 创建子进程 —— 父进程是 WmiPrvSE，
   **不在 web 进程树里** ⇒ web 重启不再打断开发环境。
 
-  用法：
-    pwsh -File scripts/dev-cdp.ps1              # 默认 CDP 端口 9333
-    pwsh -File scripts/dev-cdp.ps1 -Port 9444   # 换端口（须与 webops_attach 一致）
+  用法（本机只有 Windows PowerShell 5.1 ⇒ 用 `powershell`；装了 pwsh 的机器两者皆可）：
+    powershell -File scripts/dev-cdp.ps1              # 默认 CDP 端口 9333
+    powershell -File scripts/dev-cdp.ps1 -Port 9444   # 换端口（须与 webops_attach 一致）
+  ⚠ 2026-09-26 实测：照着旧注释敲 `pwsh -File …` 会**直接失败**——本机只装了
+    Windows PowerShell 5.1，没有 pwsh（`The term 'pwsh' is not recognized`）。
+    **脚本本身是 5.1 兼容的**（第 77 行用 `New-Object`，不是 PS7-only 的 `::new()`）——
+    失败的根因是**用法只写了 pwsh**。这类"文档与目标机器不符"把每次启动变成一次临场排障。
 
   配套（爱丽丝侧）：
     webops_attach { port: 9333 } → 之后 webops_eval/click/type/wait/console/shot 全部可用
