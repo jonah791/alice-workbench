@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ActionEvent, MessageInfo, NodeInfo, StepEvent, TaskInfo } from "../types";
-import { BUSY_WINDOW_MS, RETIRE_AFTER_MS, R_OFFLINE, R_ONLINE, SAT_ORBIT_GAP, buildPulses, buildStarMap, hashUnit, type StarMapInput } from "./layout";
+import { BUSY_WINDOW_MS, RETIRE_AFTER_MS, R_OFFLINE, R_ONLINE, SAT_ORBIT_GAP, buildPulses, buildStarMap, hashUnit, shortNames, type StarMapInput } from "./layout";
 
 /** 星图布局的聚焦测试。选判据的标准：**能证伪「星图看起来对但其实错」的那些**——
  *  位置确定性（否则星星每 2s 跳一次）、坐标有限性（NaN 会让星直接消失）、
@@ -206,5 +206,33 @@ describe("脉冲条", () => {
     );
     expect(pulses.map((p) => p.tone)).toEqual(["warn", "ok", "err", "ok"]);
     expect(pulses.map((p) => p.origin)).toEqual(["action", "action", "step", "step"]);
+  });
+});
+
+describe("shortNames：心跳缺 displayName 时的短名兜底（标签可读性 · 2026-09-26）", () => {
+  // 动机：id 回退成全 hostname 后被 CSS 截成 `LAPTOP-BF4IAPLM-…`，主人认不出星。
+  // 这组判据的证伪方向是「**剥多了**」——短名受伤比名字长更糟。
+  it("剥掉全大写主机名前缀，并保住节点序号（`0` 不是端口）", () => {
+    const m = shortNames([
+      "LAPTOP-BF4IAPLM-node-a-3090",
+      "LAPTOP-BF4IAPLM-node-b-3091",
+      "LAPTOP-BF4IAPLM-ref-0",
+      "web-0",
+      "参考适配器",
+    ]);
+    expect(m["LAPTOP-BF4IAPLM-node-a-3090"]).toBe("node-a");
+    expect(m["LAPTOP-BF4IAPLM-node-b-3091"]).toBe("node-b");
+    // 末段只有 1 位数字 ⇒ 是节点序号不是端口，必须保住
+    expect(m["LAPTOP-BF4IAPLM-ref-0"]).toBe("ref-0");
+    // 首段非全大写 ⇒ 一律不动（这两个受伤就是 bug）
+    expect(m["web-0"]).toBeUndefined();
+    expect(m["参考适配器"]).toBeUndefined();
+  });
+
+  it("单例不剥：同一主机只跑一个节点时，剥前缀没有意义且有猜错风险", () => {
+    const m = shortNames(["LAPTOP-BF4IAPLM-solo-1", "web-0", "tavern-3081"]);
+    expect(m["LAPTOP-BF4IAPLM-solo-1"]).toBeUndefined();
+    expect(m["web-0"]).toBeUndefined();
+    expect(m["tavern-3081"]).toBeUndefined();
   });
 });

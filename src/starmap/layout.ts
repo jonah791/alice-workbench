@@ -10,13 +10,21 @@
 
 import type { ActionEvent, MessageInfo, NodeInfo, StepEvent, TaskInfo } from "../types";
 
-/** 画布比例贴近实际舞台（宽 ≈ 1.45× 高）：比例差太多时 `meet` 会把星图缩成一角。 */
+/** 画布比例贴近实际舞台（宽 ≈ 1.45× 高）：比例差太多时 `meet` 会把星图缩成一角。
+ *  ⚠ 2026-09-26 实测教训（改错一次，靠量 DOM 抓回来）：把 VIEW_H 从 720 改到 924
+ *  去「匹配格子比例 1.127」是**错的**——`meet` 下星图本来就垂直居中，填满后只是
+ *  把空白从「上下各 52px」变成「上下各 161px」，星一颗没动（web-0 两版都在 cy=291）。
+ *  真正的约束是**横向**：绘制区 535×370（高 < 宽）⇒ 缩放由高度决定 ⇒ 横向必然有余量，
+ *  星环直径 313 只占 535 的 59%。⇒ 要让星图更满，该动的是**半径**，不是画布比例。 */
 export const VIEW_W = 1040;
 export const VIEW_H = 720;
 const CX = VIEW_W / 2;
 const CY = VIEW_H / 2;
-export const R_ONLINE = 200;
-export const R_OFFLINE = 305;
+/** 环半径（逻辑坐标）。**约束是纵向**：绘制区 535×370 ⇒ 缩放 0.514 ⇒ 2·R·0.514 ≤ 370
+ *  ⇒ R ≤ 360；再扣掉星名标签（`y + r + 18`，最外环的标签会顶出画布）取 **335**（原 305）。
+ *  ⚠ 别用「加大画布」来让星图更满——`meet` 下那只挪空白不挪星（见上方 VIEW_H 的实测教训）。 */
+export const R_ONLINE = 220;
+export const R_OFFLINE = 335;
 const CORE_R = 19;
 const STAR_R_ONLINE = 10;
 const STAR_R_OFFLINE = 6.5;
@@ -177,6 +185,44 @@ function spreadAngles(ids: string[]): Map<string, number> {
 const isOpenStatus = (s: string): boolean => s !== "done" && s !== "failed";
 const isFailedStatus = (s: string): boolean => s === "failed" || s === "blocked";
 
+/** 把「全大写主机名前缀」剥掉，让标签可读（DESIGN §4「认星」的硬要求）。
+ *
+ *  动机（2026-09-26 CDP 实测）：心跳缺 `displayName` 时回退到 id，而 id 形如
+ *  `LAPTOP-BF4IAPLM-node-a-3090` ⇒ 被 CSS 截成 `LAPTOP-BF4IAPLM-…`，
+ *  主人**认不出哪颗是哪个节点**——而「认星」正是星图改版的初衷。
+ *
+ *  识别规则（保守：宁可不短，也不猜错）：hostname 段的特征是**全大写字母数字**
+ *  （`LAPTOP`、`BF4IAPLM`），节点名段是小写（`node`、`web`、`ref`）。
+ *  三条约束缺一不动：① 该前缀被 **≥2** 个名字共享 ② 剥后仍含 `-`（确实还是复合名）
+ *  ③ 剥后 ≥3 字符。再叠一层：末段是 **≥3 位纯数字**（真端口）才剥 —— 于是 `ref-0`
+ *  保住那个 `0`（它是节点序号，不是端口）。
+ *
+ *  确定性：只依赖入参集合，同输入同输出（与布局其余部分一致）。 */
+export function shortNames(names: string[]): Record<string, string> {
+  const isHostSeg = (s: string): boolean => /^[A-Z0-9]+$/.test(s) && /[A-Z]/.test(s);
+  const prefixOf = (n: string): string => {
+    const segs = n.split("-");
+    let i = 0;
+    while (i < segs.length - 1 && isHostSeg(segs[i])) i += 1;
+    return i > 0 ? segs.slice(0, i).join("-") + "-" : "";
+  };
+  const counts = new Map<string, number>();
+  for (const n of names) {
+    const p = prefixOf(n);
+    if (p) counts.set(p, (counts.get(p) ?? 0) + 1);
+  }
+  const out: Record<string, string> = {};
+  for (const n of names) {
+    const p = prefixOf(n);
+    if (!p || (counts.get(p) ?? 0) < 2) continue;
+    const rest = n.slice(p.length);
+    if (rest.length < 3 || !rest.includes("-")) continue;
+    const port = /^(.*)-(\d{3,})$/.exec(rest);
+    out[n] = port && port[1].length >= 3 ? port[1] : rest;
+  }
+  return out;
+}
+
 export function buildStarMap(input: StarMapInput): StarMapModel {
   const { nodes, tasks, messages, actions, steps, now } = input;
 
@@ -265,6 +311,13 @@ export function buildStarMap(input: StarMapInput): StarMapModel {
     });
   }
 
+  // 人话名兜底：心跳缺 displayName 时把全 hostname 缩成可读短名（动机见 shortNames 的注释）
+  const shortOf = shortNames(stars.map((s) => s.name));
+  for (const s of stars) {
+    s.name = shortOf[s.name] ?? s.name;
+    if (s.label) s.label = shortOf[s.label] ?? s.label;
+  }
+
   const starById = new Map(stars.map((s) => [s.id, s]));
 
   // ── 卫星：绕宿主星运行。角度同样由 id 决定（确定性）；同一宿主的卫星也要摊开，
@@ -334,7 +387,7 @@ export function buildStarMap(input: StarMapInput): StarMapModel {
           x: retiredPos.x,
           y: retiredPos.y,
           r: 13,
-          names: retiredNodes.map((n) => n.displayName || n.id),
+          names: retiredNodes.map((n) => shortOf[n.displayName || n.id] ?? (n.displayName || n.id)),
         }
       : null;
 

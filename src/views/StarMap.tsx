@@ -1,4 +1,8 @@
 import type { Satellite, Star, StarMapModel } from "../starmap/layout";
+// 值导入：轨道环半径**必须**与布局同源。2026-09-26 实测抓到漂移——环曾硬编码 168/268，
+// 而布局是 R_ONLINE/R_OFFLINE（当时 200/305，现 220/335）⇒ 星跑到参考环**外面**，
+// 星图看着"散"。两套数字各说各话 = 判据不单源，必然再次漂移。
+import { R_OFFLINE, R_ONLINE } from "../starmap/layout";
 
 /** 星图 —— 主视图（`docs/DESIGN.md` §3 §4）。
  *
@@ -53,8 +57,8 @@ export function StarMap({
         <rect className="map-bg" x={0} y={0} width={model.w} height={model.h} onClick={onClear} />
 
         <g className="orbits">
-          <circle cx={cx} cy={cy} r={168} />
-          <circle cx={cx} cy={cy} r={268} />
+          <circle cx={cx} cy={cy} r={R_ONLINE} />
+          <circle cx={cx} cy={cy} r={R_OFFLINE} />
         </g>
 
         {/* 光弧：消息 from → to（最近 8s 加亮一次） */}
