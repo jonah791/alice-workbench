@@ -1,5 +1,5 @@
-import { mockCommissionSnapshot, mockDshStatus, mockSnapshot } from "./mock";
-import type { CommissionSnapshot, DshStatus, Snapshot, SpawnedNode } from "./types";
+import { mockCommissionSnapshot } from "./mock";
+import type { CommissionSnapshot } from "./types";
 
 /** 是否运行在 Tauri 窗口里。浏览器里 `invoke` 必然失败，因此显式分流。 */
 export const IS_TAURI =
@@ -34,46 +34,9 @@ async function events(): Promise<ListenFn> {
   return _listen;
 }
 
-export const busSnapshot = async (): Promise<Snapshot> =>
-  DEMO ? mockSnapshot() : (await core())<Snapshot>("bus_snapshot");
-
-export const sendMessage = async (to: string, text: string, kind?: string): Promise<string> =>
-  DEMO ? `m-demo-${Date.now().toString(16)}` : (await core())<string>("send_message", { to, text, kind });
-
-export const dshStatus = async (): Promise<DshStatus> =>
-  DEMO ? mockDshStatus() : (await core())<DshStatus>("dsh_status");
-
-export const dshRecover = async (): Promise<string> =>
-  DEMO ? "（演示模式）不会真的启动 DSH" : (await core())<string>("dsh_recover");
-
-/* ── 节点生命周期 ─────────────────────────────────────────────────────
-   工作台是**启动方**，因此也负责收尸：Windows 上 Node 收不到 SIGTERM
-   （进程不会自己清心跳）⇒ stop 必须显式删心跳 + 校验归属。 */
-
-export const spawnedNodes = async (): Promise<SpawnedNode[]> =>
-  DEMO ? [] : (await core())<SpawnedNode[]>("spawned_nodes");
-
-export const spawnRefNode = async (displayName?: string): Promise<SpawnedNode> =>
-  DEMO
-    ? { nodeId: "demo-wb-0", displayName: displayName ?? "参考节点", pid: 0, atMs: Date.now(), workdir: "" }
-    : (await core())<SpawnedNode>("spawn_ref_node", { displayName });
-
-export const stopRefNode = async (nodeId: string): Promise<string> =>
-  DEMO ? "（演示模式）不会真的停止节点" : (await core())<string>("stop_ref_node", { nodeId });
-
-/** 演示模式下用定时器模拟"总线有变化"，让行为流与节点灯看起来是活的。 */
-export const onBusChanged = async (fn: (s: Snapshot) => void): Promise<() => void> => {
-  if (DEMO) {
-    const id = window.setInterval(() => fn(mockSnapshot()), 2500);
-    return () => window.clearInterval(id);
-  }
-  const listen = await events();
-  return listen<Snapshot>("bus-changed", (e) => fn(e.payload));
-};
-
-/* ── v0.5 委托台 ───────────────────────────────────────────────────────
-   两个命令，一条事件。**内部一律不可见**（宪法 ①）——
-   这一节里没有节点、没有总线、没有日志，那是刻意的，不是还没写。 */
+/* ── 委托台：两个命令，一条事件 ────────────────────────────────────────
+   **内部一律不可见**（宪法 ①）—— 这一节里没有节点、没有总线、没有日志，
+   那是刻意的，不是还没写。 */
 
 export const listCommissions = async (): Promise<CommissionSnapshot> =>
   DEMO ? mockCommissionSnapshot() : (await core())<CommissionSnapshot>("list_commissions");

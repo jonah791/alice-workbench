@@ -1,7 +1,4 @@
-mod bus;
 mod commissions;
-mod dsh;
-mod nodes;
 
 use serde_json::json;
 use std::fs;
@@ -106,8 +103,8 @@ fn setup_tray(app: &mut tauri::App) -> tauri::Result<()> {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            // 总线轮询：内容指纹变化即推前端（P1-4 判据 1s，实际 150ms 量级）
-            bus::start_watch(app.handle().clone());
+            // 委托台轮询：内容指纹变化即推前端（三档自适应，见 commissions.rs）
+            commissions::start_watch(app.handle().clone());
             restore_window_geometry(&app.handle());
             setup_tray(app)?;
             Ok(())
@@ -122,13 +119,8 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            bus::bus_snapshot,
-            bus::send_message,
-            dsh::dsh_status,
-            dsh::dsh_recover,
-            nodes::spawn_ref_node,
-            nodes::stop_ref_node,
-            nodes::spawned_nodes,
+            commissions::list_commissions,
+            commissions::submit_commission,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run alice-workbench");
