@@ -35,7 +35,14 @@ pub fn data_dir() -> PathBuf {
     PathBuf::from(home).join(".workbench")
 }
 
+/// ⚠ 这四个结构体**必须**带 `rename_all = "camelCase"`：它们是发往前端的 IPC 载荷，
+/// 而前端契约 `src/types.ts` 用的是 camelCase（`atMs` / `whyOnlyYou` / `dataDir` / `dataOk` /
+/// `scannedAtMs`）。少了它，单词字段（`id` / `text` / `status`）照常工作，**camelCase 字段静默变
+/// `undefined`** —— 症状是界面上 `NaN 天前`、以及 `dataOk` 永远为假导致「数据目录不可用」提示失灵。
+/// 读盘路径不受影响（那里按字符串键取 `"atMs"` 等，见 `u64_field`）。回归判据见 `tests` 的
+/// `ipc_payload_uses_camel_case`。
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct Artifact {
     pub name: String,
     /// 呈现类型：`image` / `video` / `code` / `page` / `file`（未知一律降级为 `file`，I4）。
@@ -45,6 +52,7 @@ pub struct Artifact {
 }
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct RequestInfo {
     pub what: String,
     pub why_only_you: String,
@@ -52,6 +60,7 @@ pub struct RequestInfo {
 }
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct Commission {
     pub id: String,
     pub text: String,
@@ -66,6 +75,7 @@ pub struct Commission {
 }
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     pub data_dir: String,
     pub data_ok: bool,
@@ -426,5 +436,65 @@ mod tests {
         let b = fingerprint(&base);
         assert_ne!(a, b, "新增委托必须让指纹变化，否则前端收不到推送");
         fs::remove_dir_all(&base).ok();
+    }
+
+    /// 尸体样本来自 2026-09-27 真窗口自审：四个结构体曾缺 `rename_all`，
+    /// 单词字段（`id` / `text` / `status`）照常工作，**camelCase 字段静默变 `undefined`**
+    /// ⇒ 界面显示「NaN 天前」、`dataOk` 恒假令「数据目录不可用」提示失灵。
+    /// 原有 6 条测试全绿却漏掉它：那些测试走的是 `snapshot()` 之后的 Rust 结构体，
+    /// 从不检查**发往前端的键名**。本条的检验对象正是那一跳。
+    #[test]
+    fn ipc_payload_uses_camel_case() {
+        let c = Commission {
+            id: "c1".into(),
+            text: "t".into(),
+            attachments: vec![],
+            status: "needs-you".into(),
+            at_ms: 1_700_000_000_000,
+            artifacts: vec![Artifact {
+                name: "a.png".into(),
+                kind: "image".into(),
+                path: "p".into(),
+                bytes: 3,
+            }],
+            request: Some(RequestInfo {
+                what: "w".into(),
+                why_only_you: "y".into(),
+                at_ms: 1,
+            }),
+        };
+        let v = serde_json::to_value(&c).unwrap();
+        for k in ["atMs", "artifacts", "attachments", "status", "request"] {
+            assert!(
+                v.get(k).is_some(),
+                "IPC 载荷缺 {k}（前端契约见 src/types.ts）"
+            );
+        }
+        // `request` 是嵌套对象 —— 它的字段也要逐个查（首版把它们写在顶层，测试当场抓住）
+        let r = v.get("request").expect("needs-you 必须带 request 对象");
+        for k in ["what", "whyOnlyYou", "atMs"] {
+            assert!(r.get(k).is_some(), "request 缺 {k}");
+        }
+        // 反向：snake_case 不得出现 —— 前端读到 undefined 不会报错，只会安静地坏掉
+        for k in ["at_ms", "why_only_you"] {
+            assert!(v.get(k).is_none(), "IPC 载荷泄漏 snake_case 键 {k}");
+            assert!(r.get(k).is_none(), "request 泄漏 snake_case 键 {k}");
+        }
+
+        let s = serde_json::to_value(Snapshot {
+            data_dir: "d".into(),
+            data_ok: true,
+            scanned_at_ms: 2,
+            commissions: vec![],
+            fingerprint: "f".into(),
+        })
+        .unwrap();
+        for k in ["dataDir", "dataOk", "scannedAtMs"] {
+            assert!(s.get(k).is_some(), "Snapshot 载荷缺 {k}");
+        }
+        assert!(
+            s.get("data_ok").is_none(),
+            "Snapshot 泄漏 snake_case 键 data_ok"
+        );
     }
 }
