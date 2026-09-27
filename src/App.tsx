@@ -1,44 +1,34 @@
+/** 委托台主视图 —— v0.5。
+ *
+ *  结构只有两端：上面是**输入**（主人的唯一动作），下面是**委托列表**与选中委托的**产物**。
+ *  中间没有任何东西：没有节点、没有拓扑、没有心跳、没有日志（宪法 ①）。
+ *  若有人想在这里加一块「让主人更了解内部」的面板 —— 那是违反宪法的，不加。
+ *
+ *  保留下来的三件旧经验（都与内部可见性无关，是**能耗与可靠性纪律**）：
+ *  ① `useActivity` 活跃度节流（2026-09-15：不看它时它不该烧 CPU）；
+ *  ② 兜底轮询（事件通道会静默失效，两条路比一条路可靠）；
+ *  ③ 回前台立刻补一次快照（后端在窗口隐藏时**刻意不推**，见 §5.2）。 */
+
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { busSnapshot, DEMO, dshRecover, dshStatus, onBusChanged } from "./api";
-import { buildPulses, buildStarMap, isSparse } from "./starmap/layout";
-import type { DshStatus, LocalEvent, Snapshot } from "./types";
-import { ActionStream } from "./views/ActionStream";
-import { Cockpit } from "./views/Cockpit";
-import { DetailPanel } from "./views/DetailPanel";
-import { PulseBar } from "./views/PulseBar";
-import { StarMap } from "./views/StarMap";
-import { Starter } from "./views/Starter";
-import "./starmap/starmap.css";
-import "./starter.css";
+import { DEMO, listCommissions, onCommissionsChanged, submitCommission } from "./api";
+import type { CommissionSnapshot } from "./types";
+import { ArtifactCard } from "./components/ArtifactCard";
+import { Commissions } from "./views/Commissions";
+import { Composer } from "./views/Composer";
 
-type Sel = { type: "node" | "task"; id: string } | null;
-
-/** 初始视图可以从地址栏给：`#view=list` · `#task=<taskId>` · `#node=<nodeId>`。
- *  用途有二：① 让「某个任务 / 某个节点」可以被**直接指出来**（汇报、告警里贴链接）；
- *  ② 给无头截图验收一条**可复现的状态入口**（点击态没法用 CLI 模拟，链接可以）。 */
-const readHash = (): { view: "map" | "list"; sel: Sel } => {
-  if (typeof window === "undefined") return { view: "map", sel: null };
-  const p = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-  const task = p.get("task");
-  const node = p.get("node");
-  return {
-    view: p.get("view") === "list" ? "list" : "map",
-    sel: task ? { type: "task", id: task } : node ? { type: "node", id: node } : null,
-  };
-};
-
-/** 活跃度（**可见 + 有焦点**才算「在用」）：驱动轮询节流与 `body.idle` 动画暂停。
+/** 活跃度（**可见 + 有焦点**才算「在用」）：驱动轮询节流与 `body.idle` 装饰暂停。
  *
  *  2026-09-15 主人「电脑操作能不能在后台完成？影响我玩游戏了」——
- *  实测工作台一小时烧 208 CPU 秒（星图持续动画 + 2s 重渲染 + Rust 侧 150ms 扫总线），
- *  主人在全屏游戏里会被它拖出微卡顿。**不看它的时候，它不该烧 CPU/GPU。** */
+ *  实测工作台一小时烧 208 CPU 秒（星图持续动画 + 重渲染 + Rust 侧扫描），
+ *  主人在全屏游戏里会被拖出微卡顿。**不看它的时候，它不该烧 CPU/GPU。** */
 function useActivity(): { active: boolean; visible: boolean } {
   const [state, setState] = useState(() => ({
     active: typeof document !== "undefined" && !document.hidden && document.hasFocus(),
     visible: typeof document !== "undefined" && !document.hidden,
   }));
   useEffect(() => {
-    const read = () => setState({ active: !document.hidden && document.hasFocus(), visible: !document.hidden });
+    const read = () =>
+      setState({ active: !document.hidden && document.hasFocus(), visible: !document.hidden });
     window.addEventListener("visibilitychange", read);
     window.addEventListener("focus", read);
     window.addEventListener("blur", read);
@@ -55,145 +45,59 @@ function useActivity(): { active: boolean; visible: boolean } {
   return state;
 }
 
-/** 星图为主视图（`docs/DESIGN.md` v0.2）；列表视图保留 v0.1 的名册 + 任务板。
- *
- *  视图体系：顶栏 HUD（状态）· 主区（星图 / 列表）· 右侧上下文面板（点谁看谁）·
- *  底部脉冲条（行为图形化，点开才是全文）。**文字退到第二层，信息一条不少。**
- *
- *  v0.3（2026-09-15，主人判「没有可用性」后）：补**动作层**——
- *  ① 稀疏态下主区叠**起步层**（现状一句话 + 派任务），空系统也要回答「我能做什么」；
- *  ② 右侧概览从「只有数字」改为「派一件事 + 现状」动作优先。 */
 export function App() {
-  const [snap, setSnap] = useState<Snapshot | null>(null);
-  const [dsh, setDsh] = useState<DshStatus | null>(null);
-  const [sel, setSel] = useState<Sel>(() => readHash().sel);
-  const [view, setView] = useState<"map" | "list">(() => readHash().view);
-  const [pulseOpen, setPulseOpen] = useState(false);
-  const [local, setLocal] = useState<LocalEvent[]>([]);
-  const [recovering, setRecovering] = useState(false);
-  const [confirmRecover, setConfirmRecover] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
+  const [snap, setSnap] = useState<CommissionSnapshot | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  const pushLocal = useCallback((text: string, tone: LocalEvent["tone"]) => {
-    setLocal((l) => [...l.slice(-99), { atMs: Date.now(), text, tone }]);
+  const refresh = useCallback(() => {
+    listCommissions()
+      .then((s) => {
+        setSnap(s);
+        setErr(null);
+      })
+      .catch((e) => setErr(String(e)));
   }, []);
 
-  // 总线：首帧快照 + 订阅变化（Rust 侧 150ms 轮询驱动，零模型调用）
+  // 首帧快照 + 订阅变化（Rust 侧自适应轮询驱动，零模型调用）
   useEffect(() => {
-    busSnapshot()
-      .then(setSnap)
-      .catch((e) => pushLocal(`总线读取失败：${String(e)}`, "err"));
-    const un = onBusChanged(setSnap);
+    refresh();
+    const un = onCommissionsChanged(setSnap);
     return () => {
       void un.then((f) => f());
     };
-  }, [pushLocal]);
+  }, [refresh]);
 
-  // 活跃度驱动节流（见上方 useActivity）：有焦点=全速 · 可见无焦点=余光（15s）· 后台=没人看（60s）
   const { active, visible } = useActivity();
 
-  // 兜底轮询：事件通道是「快路」（<1s），但权限被拒、监听丢失、窗口休眠都可能让它静默失效。
-  // 低频轮询保证 UI 永远能在数秒内回到真实状态——**两条路都比一条路可靠**（对照 §5.24 兜底纪律）。
+  // 兜底轮询：事件通道是「快路」，但监听丢失、权限被拒、窗口休眠都可能让它静默失效。
+  // 低频轮询保证 UI 永远能回到真实状态 —— **两条路都比一条路可靠**。
   useEffect(() => {
     if (DEMO) return;
     const periodMs = active ? 3000 : visible ? 15_000 : 60_000;
-    const id = window.setInterval(() => {
-      busSnapshot()
-        .then(setSnap)
-        .catch(() => undefined);
-    }, periodMs);
+    const id = window.setInterval(refresh, periodMs);
     return () => window.clearInterval(id);
-  }, [active, visible]);
+  }, [active, visible, refresh]);
 
-  // 回到前台立刻补一次快照：Rust 侧在无焦点/最小化时会**降频轮询**（节能），
-  // 不能等它下一拍——否则切回来的第一眼是旧数据。
+  // 回到前台立刻补一次：后端在隐藏时**刻意不推**（省掉渲染器唤醒重绘），
+  // 不能等它下一拍 —— 否则切回来的第一眼是旧数据。
   useEffect(() => {
     if (!active || DEMO) return;
-    busSnapshot()
-      .then(setSnap)
-      .catch(() => undefined);
-  }, [active]);
+    refresh();
+  }, [active, refresh]);
 
-  // DSH 运行时状态：纯本地探测（TCP + 文件）
-  useEffect(() => {
-    const tick = () => {
-      dshStatus()
-        .then(setDsh)
-        .catch(() => setDsh(null));
-    };
-    tick();
-    const id = window.setInterval(tick, active ? 10_000 : 60_000);
-    return () => window.clearInterval(id);
-  }, [active]);
-
-  // 星图的「忙碌 / 新消息」判据依赖 now（布局本身是确定性的，与 now 无关）：
-  // 2s 走一格，够 20s 忙碌窗口用，且不产生任何模型调用。窗口休眠后自动追上真实时间。
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), active ? 2000 : visible ? 10_000 : 30_000);
-    return () => window.clearInterval(id);
-  }, [active, visible]);
-
-  /** 危险动作二次确认（spec §4.3）：一键恢复会调 `<workspace>/.dsh/init-dsh.ps1`，而该脚本
-   *  第一步就是清理现有 DSH 进程——等于重启正在承载会话的运行时。故第一次点击只进入确认态
-   *  （5 秒内再点一次才执行）：不弹窗、不打断流程，但误点一下不会造成重启。 */
-  const recover = async () => {
-    if (!confirmRecover) {
-      setConfirmRecover(true);
-      pushLocal("再点一次确认：恢复会重启 DSH 运行时", "warn");
-      window.setTimeout(() => setConfirmRecover(false), 5000);
-      return;
-    }
-    setConfirmRecover(false);
-    setRecovering(true);
-    pushLocal("请求恢复 DSH（调运行时管理器）", "info");
-    try {
-      const msg = await dshRecover();
-      pushLocal(msg, "ok");
-      window.setTimeout(() => {
-        dshStatus().then(setDsh).catch(() => undefined);
-      }, 2000);
-    } catch (e) {
-      pushLocal(`恢复失败：${String(e)}`, "err");
-    } finally {
-      setRecovering(false);
-    }
-  };
-
-  const nodes = snap?.nodes ?? [];
-  const tasks = snap?.tasks ?? [];
-  const steps = snap?.steps ?? [];
-  const actions = snap?.actions ?? [];
-  const messages = snap?.messages ?? [];
-  const online = snap?.onlineCount ?? 0;
-
-  const model = useMemo(
-    () => buildStarMap({ nodes, tasks, messages, actions, steps, now }),
-    [nodes, tasks, messages, actions, steps, now],
+  const items = snap?.commissions ?? [];
+  const selected = useMemo(
+    () => items.find((c) => c.id === selectedId) ?? items[0] ?? null,
+    [items, selectedId],
   );
-  const pulses = useMemo(() => buildPulses(actions, steps, 64), [actions, steps]);
-  /** 稀疏态：没有别人在干活、也没有待办 ⇒ 主区叠起步层（判据在 layout.ts，纯函数可单测）。 */
-  const sparse = isSparse(model.stats);
-
-  const selNode = sel?.type === "node" ? nodes.find((n) => n.id === sel.id) ?? null : null;
-  const selTask = sel?.type === "task" ? tasks.find((t) => t.taskId === sel.id) ?? null : null;
+  const doingCount = useMemo(() => items.filter((c) => c.status === "doing").length, [items]);
 
   return (
     <div className="app">
       <header className="hud">
         <div className="hud-title">
-          爱丽丝工作台<span>多智能体 · 可派任务 · 零模型调用</span>
-        </div>
-        <div className="seg">
-          <button className={`seg-btn ${view === "map" ? "on" : ""}`} onClick={() => setView("map")} title="星图：看全局面">
-            星图
-          </button>
-          <button
-            className={`seg-btn ${view === "list" ? "on" : ""}`}
-            onClick={() => setView("list")}
-            title="列表：名册 + 任务一句话列表（星图看不清时用）"
-          >
-            列表
-          </button>
+          爱丽丝工作台<span>交给我一件事</span>
         </div>
         <div className="hud-spacer" />
         {DEMO && (
@@ -202,79 +106,47 @@ export function App() {
             演示数据 <b>浏览器模式</b>
           </div>
         )}
-        <div className="hud-stat">
-          <span className={`dot ${dsh?.webOnline ? "on" : "err"}`} />
-          DSH <b>{dsh?.webOnline ? `在线 :${dsh.port}` : "未响应"}</b>
-        </div>
-        <div className="hud-stat">
-          <span className={`dot ${online > 0 ? "on" : "off"}`} />
-          节点 <b>{online}</b> 在线
-        </div>
-        <div className="hud-stat">
-          <span className={`dot ${snap?.busOk ? "busy" : "err"}`} />
-          总线 <b>{snap?.busOk ? "已挂载" : "缺失"}</b>
-        </div>
-        <button
-          className={`btn ${confirmRecover ? "warn" : ""}`}
-          disabled={recovering}
-          onClick={() => void recover()}
-          title="调起 DSH 运行时管理器（会清理并重启 DSH 进程）——因此需要二次确认"
-        >
-          {recovering ? "恢复中…" : confirmRecover ? "确认恢复？再点一次" : "一键恢复 DSH"}
-        </button>
+        {items.length > 0 && (
+          <div className="hud-stat">
+            在做 <b>{doingCount}</b>
+          </div>
+        )}
       </header>
+
+      <Composer
+        onSubmit={async (text) => {
+          await submitCommission(text);
+          refresh();
+        }}
+      />
+
+      {err && <div className="banner-err">数据面读取失败：{err}</div>}
 
       <div className="main">
         <section className="stage">
-          {view === "map" ? (
+          <Commissions items={items} selectedId={selected?.id ?? null} onSelect={setSelectedId} />
+        </section>
+        <aside className="detail">
+          {selected ? (
             <>
-              <StarMap
-                model={model}
-                selectedStar={sel?.type === "node" ? sel.id : null}
-                selectedTask={sel?.type === "task" ? sel.id : null}
-                onPickStar={(id) => setSel({ type: "node", id })}
-                onPickTask={(id) => setSel({ type: "task", id })}
-                onClear={() => setSel(null)}
-              />
-              {sparse && (
-                <Starter
-                  model={model}
-                  nodes={nodes}
-                  onLocal={pushLocal}
-                  onShowList={() => setView("list")}
-                />
+              <div className="detail-head">{selected.text}</div>
+              {selected.artifacts.length > 0 ? (
+                <div className="artifacts">
+                  {selected.artifacts.map((a) => (
+                    <ArtifactCard key={a.path} a={a} />
+                  ))}
+                </div>
+              ) : selected.status === "doing" ? (
+                <p className="detail-hint">在做 —— 有结果会出现在这里。</p>
+              ) : (
+                <p className="detail-hint">还没有产物。</p>
               )}
             </>
           ) : (
-            <Cockpit
-              nodes={nodes}
-              tasks={tasks}
-              steps={steps}
-              selected={selNode?.id ?? null}
-              onSelect={(id) => setSel({ type: "node", id })}
-            />
+            <p className="detail-hint">左边选中一条委托，它的产物会显示在这里。</p>
           )}
-        </section>
-
-        <DetailPanel
-          sel={sel}
-          model={model}
-          pulses={pulses}
-          node={selNode}
-          task={selTask}
-          steps={steps}
-          actions={actions}
-          messages={messages}
-          nodes={nodes}
-          sparse={sparse}
-          onLocal={pushLocal}
-          onClear={() => setSel(null)}
-        />
+        </aside>
       </div>
-
-      <PulseBar pulses={pulses} now={now} expanded={pulseOpen} onToggle={() => setPulseOpen((v) => !v)}>
-        <ActionStream actions={actions} local={local} messages={messages} />
-      </PulseBar>
     </div>
   );
 }

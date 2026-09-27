@@ -74,10 +74,9 @@ body::before {
    `body.idle` = 窗口可见但**没有焦点**，或已被切到后台/最小化（App.tsx 的 useActivity）。
    动画继续跑会让 WebView2 合成器永远不休眠——实测工作台占 208 CPU 秒/小时，
    主人在全屏游戏里会被它拖出微卡顿。暂停全部装饰性动画，回到前台立刻恢复。 */
-body.idle .star .pulse,
-body.idle .dot.on,
-body.idle .link.fresh,
-body.idle .ev.fresh { animation-play-state: paused; }
+/* v0.5：旧类（`.star .pulse` / `.link` / `.ev`）随星图与事件流一起下线，
+   这条纪律现在只管还有动画的那一个 —— 将来加动画元素时，记得往这里补选择器。 */
+body.idle .dot.on { animation-play-state: paused; }
 
 /* ── 主体布局 ─────────────────────────────────────── */
 /* v0.1 是三列（名册 / 详情 / 事件流）；v0.2 起主区是**星图**，列宽由 starmap.css 覆盖。 */
@@ -201,3 +200,95 @@ body.idle .ev.fresh { animation-play-state: paused; }
   word-break: break-word;
 }
 .toast:hover { background: rgba(26, 32, 48, 1); }
+
+/* ── v0.5 委托台 ────────────────────────────────────────────────────────
+   界面只有两端：输入（上）+ 委托与产物（下）。中间没有内部过程可看，
+   所以这里没有拓扑、没有连线、没有脉冲刻度 —— 那些样式随星图一起下线。 */
+
+/* 输入区从「底部」搬到「顶部」：主人先说要什么，再往下看结果 */
+.composer { border-top: none; border-bottom: 1px solid var(--line); padding: 12px 14px; }
+.composer-input {
+  width: 100%; min-height: 52px; resize: vertical;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 9px 11px; font: inherit;
+}
+.composer-input:focus { outline: none; border-color: rgba(0, 229, 255, 0.5); }
+.composer-input::placeholder { color: var(--weak); }
+.composer-foot { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.composer-send {
+  border: 1px solid rgba(0, 229, 255, 0.45);
+  background: var(--panel-hi); color: var(--cy);
+  border-radius: 6px; padding: 6px 14px;
+  font: inherit; font-size: 12px; cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.composer-send:hover:not(:disabled) { background: #1f2735; }
+.composer-send:disabled { opacity: 0.4; cursor: not-allowed; }
+.composer-hint { font-size: 11px; color: var(--weak); font-family: var(--mono); }
+.composer-err { margin-top: 8px; font-size: 11.5px; color: var(--mg); }
+
+.banner-err {
+  padding: 7px 14px; font-size: 12px;
+  color: #ffd7ec; background: rgba(255, 45, 149, 0.12);
+  border-bottom: 1px solid rgba(255, 45, 149, 0.35);
+}
+
+/* ── 委托列表 ─────────────────────────────────────────── */
+.stage { min-width: 0; border-right: 1px solid var(--line); overflow-y: auto; }
+.commissions { list-style: none; margin: 0; padding: 10px; }
+.commission {
+  padding: 10px 12px; margin-bottom: 7px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 7px;
+  cursor: pointer; transition: background 0.12s, border-color 0.12s;
+}
+.commission:hover { background: var(--panel-hi); border-color: #2d3644; }
+.commission.is-selected { border-color: rgba(0, 229, 255, 0.55); background: var(--panel-hi); }
+.commission-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 9px; align-items: baseline; }
+.commission-text { color: var(--text); word-break: break-word; }
+.commission-when { color: var(--weak); font-size: 11px; font-family: var(--mono); white-space: nowrap; }
+.commission-sub { margin: 5px 0 0 27px; font-size: 11px; color: var(--dim); font-family: var(--mono); }
+
+/* 三种标记，多一种都不加（§4） */
+.mark { font-family: var(--mono); font-size: 14px; text-align: center; }
+.mark-doing { color: var(--am); }
+.mark-delivered { color: var(--gn); }
+.mark-needs { color: var(--mg); }
+.commission-needs {
+  margin: 7px 0 0 27px; padding: 7px 10px;
+  border-left: 3px solid var(--mg); background: rgba(255, 45, 149, 0.09);
+  border-radius: 0 5px 5px 0;
+}
+.needs-what { color: #ffd7ec; }
+.needs-why { margin-top: 3px; font-size: 11px; color: var(--dim); }
+
+.empty-hint { margin-top: 6px; font-size: 11.5px; color: var(--weak); }
+
+/* ── 产物 ─────────────────────────────────────────────── */
+.detail { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+.detail .detail-head { font-family: var(--mono); font-size: 12.5px; word-break: break-word; }
+.detail-hint { padding: 18px 14px; color: var(--weak); font-size: 12px; }
+.artifacts { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.artifact {
+  padding: 9px 11px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 7px;
+}
+.artifact.kind-image { border-left: 3px solid var(--cy); }
+.artifact.kind-video { border-left: 3px solid var(--mg); }
+.artifact.kind-code { border-left: 3px solid var(--gn); }
+.artifact.kind-page { border-left: 3px solid var(--am); }
+.artifact.kind-file { border-left: 3px solid var(--weak); }
+.artifact-head { display: flex; align-items: baseline; gap: 10px; }
+.artifact-name { font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
+.artifact-meta { margin-left: auto; font-size: 11px; color: var(--dim); white-space: nowrap; }
+.artifact-path {
+  margin-top: 4px; font-size: 10.5px; color: var(--weak);
+  font-family: var(--mono); word-break: break-all;
+}
+.artifact-copy {
+  margin-top: 6px; padding: 3px 9px;
+  font: inherit; font-size: 11px; cursor: pointer;
+  background: transparent; color: var(--dim);
+  border: 1px solid var(--line); border-radius: 5px;
+}
+.artifact-copy:hover { color: var(--cy); border-color: rgba(0, 229, 255, 0.45); }

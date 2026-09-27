@@ -1,5 +1,5 @@
-import { mockDshStatus, mockSnapshot } from "./mock";
-import type { DshStatus, Snapshot, SpawnedNode } from "./types";
+import { mockCommissionSnapshot, mockDshStatus, mockSnapshot } from "./mock";
+import type { CommissionSnapshot, DshStatus, Snapshot, SpawnedNode } from "./types";
 
 /** 是否运行在 Tauri 窗口里。浏览器里 `invoke` 必然失败，因此显式分流。 */
 export const IS_TAURI =
@@ -69,4 +69,28 @@ export const onBusChanged = async (fn: (s: Snapshot) => void): Promise<() => voi
   }
   const listen = await events();
   return listen<Snapshot>("bus-changed", (e) => fn(e.payload));
+};
+
+/* ── v0.5 委托台 ───────────────────────────────────────────────────────
+   两个命令，一条事件。**内部一律不可见**（宪法 ①）——
+   这一节里没有节点、没有总线、没有日志，那是刻意的，不是还没写。 */
+
+export const listCommissions = async (): Promise<CommissionSnapshot> =>
+  DEMO ? mockCommissionSnapshot() : (await core())<CommissionSnapshot>("list_commissions");
+
+export const submitCommission = async (text: string, attachments?: string[]): Promise<string> =>
+  DEMO
+    ? `c-demo-${Date.now().toString(16)}`
+    : (await core())<string>("submit_commission", { text, attachments });
+
+/** 委托 / 产物变化。窗口隐藏时后端**不**推送，前端回前台自己补一次快照（§5.2）。 */
+export const onCommissionsChanged = async (
+  fn: (s: CommissionSnapshot) => void,
+): Promise<() => void> => {
+  if (DEMO) {
+    const id = window.setInterval(() => fn(mockCommissionSnapshot()), 2500);
+    return () => window.clearInterval(id);
+  }
+  const listen = await events();
+  return listen<CommissionSnapshot>("commissions-changed", (e) => fn(e.payload));
 };
