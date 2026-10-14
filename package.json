@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "description": "爱丽丝工作台 —— 多智能体工作台的桌面应用（只读总线 + 零模型调用）",
   "type": "module",
+  "dsh": {
+    "testPlatform": "win32"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
